@@ -4,28 +4,12 @@
 
 ## To Build:
 
-### Clone:
+Ensure Docker is installed
 
-` git clone git@github.com:atkirschenman/low-level-navigator.git --recurse-submodule `
+' docker build -t pico-builder . '
 
-### Install Required packages (Ubuntu 22.04 or greater):
-
-```
-sudo apt install \
-    cmake \
-    gcc-arm-none-eabi \
-    libnewlib-arm-none-eabi \
-    libstdc++-arm-none-eabi-newlib \
-    build-essential \
-    pkg-config \
-    libusb-1.0-0-dev \
-```
-
-### Compile:
-
-```
-./scripts/build.sh
-```
+### Change path to match location
+docker run --rm -v ~/Documents/low-level-navigator:/workspace pico-builder
 
 ## LLN Architecture 
 
