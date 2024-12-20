@@ -4,10 +4,10 @@ cmake_minimum_required(VERSION 3.17)
 # note: this must happen before project()
 
 include(cmake/pico_sdk_import.cmake)
-
+include(cmake/FreeRTOS_Kernel_import.cmake)
 project(low-level-nav)
 set(CMAKE_BUILD_TYPE Debug)
-
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 add_executable(${PROJECT_NAME} ${CMAKE_CURRENT_SOURCE_DIR}/src/low-level-navigator.cpp)
 
@@ -15,24 +15,28 @@ target_include_directories(
 ${PROJECT_NAME} 
 PUBLIC 
 ${CMAKE_CURRENT_SOURCE_DIR}/src/
+${CMAKE_CURRENT_SOURCE_DIR}/src/utility/
 ${CMAKE_CURRENT_SOURCE_DIR}/src/high_level_drivers/
-${CMAKE_CURRENT_SOURCE_DIR}/src/hardware_configurations/
+${CMAKE_CURRENT_SOURCE_DIR}/src/hardware_drivers/
 )
 
 target_link_directories(
     ${PROJECT_NAME}
     PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src/
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/utility/
     ${CMAKE_CURRENT_SOURCE_DIR}/src/high_level_drivers/
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/hardware_configurations/
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/hardware_drivers/
     )
 
 target_sources(
     ${PROJECT_NAME}
     PUBLIC     
     ${CMAKE_CURRENT_SOURCE_DIR}/src/low-level-navigator.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/high_level_drivers/propulsion_engine.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/hardware_configurations/configuration_1.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/utility/logger.cpp
+    #${CMAKE_CURRENT_SOURCE_DIR}/src/high_level_drivers/propulsion_engine.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/hardware_drivers/gpio_driver.cpp
+
 )
 
 # initialize the Raspberry Pi Pico SDK
@@ -59,6 +63,9 @@ target_compile_definitions(freertos_config
 )
 
 target_link_libraries(${PROJECT_NAME}
+  #pico_async_context_freertos
+  pico_multicore
+  FreeRTOS-Kernel-Heap4
   pico_stdlib
   hardware_pwm)
 

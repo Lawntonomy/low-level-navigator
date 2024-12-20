@@ -7,7 +7,7 @@ class PropulsionEngineClass {
     ~PropulsionEngineClass();
 
     uint8_t set_speed(uint16_t new_rpm);
-    int32_t control_loop(int32_t current_rpm);
+    void control_loop(int32_t current_rpm);
 
   private:
     
