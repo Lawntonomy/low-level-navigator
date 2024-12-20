@@ -2,6 +2,8 @@
 #include <algorithm>
 #include "utility/logger.h"
 
+static const char* category = "prop_engine";
+
         PropulsionEngineClass::PropulsionEngineClass(float kp_init, float ki_init, float kd_init):
         kp(kp_init), ki(ki_init), kd(kd_init)
         {
@@ -15,20 +17,24 @@
 
         uint8_t PropulsionEngineClass::set_speed(uint16_t new_rpm)
         {
+            //turn this into a queue recieive
             if (new_rpm < 200)
             {
-                log_info("Set Speed to %d", new_rpm);
+                Log::info(category, "Set Speed to %d", new_rpm);
                 target_rpm = new_rpm;
             }
-            else 
+            else
             {
-                log_error("Speed Command Invalid! Speed: %d", new_rpm);
+                Log::error(category, "Speed Command Invalid! Speed: %d", new_rpm);
             }
         }
 
-        int32_t PropulsionEngineClass::control_loop(int32_t current_rpm)
+        void PropulsionEngineClass::control_loop(int32_t current_rpm)
         {
+            //any initialization
 
+            for(;;)
+            {
             error_rpm = static_cast<float>(target_rpm - current_rpm);
 
             integral_rpm += error_rpm;
@@ -38,15 +44,16 @@
             //clamp outputs to prevent overruns
             if (output + delta_output >= 65000)
             {
-                log_warn("commanding max value");
+                Log::warn(category, "commanding max value");
                 return output;
             }
             if (output - delta_output <= -65000)
             {
-                log_warn("commanding min value");
+                Log::warn(category, "commanding min value");
                 return output;
             }
-
             prior_error = error_rpm;
-            return (output);
+
+            vtaskdelay(50);
+            }
         }

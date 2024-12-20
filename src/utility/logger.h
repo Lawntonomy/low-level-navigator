@@ -1,53 +1,20 @@
 #pragma once
 #include <stdio.h>
 #include <stdarg.h>
-#include "pico/stdlib.h"
+#include <string>
 
-static uint64_t log_count;
-
-static void log_trace(const char *format, ...)
+class Log
 {
-    printf("1 %ld ", log_count++);
-    va_list args;
-    va_start(args, format);
-    vprintf(format, args);
-    va_end(args);
-
-    printf("\n");
-}
-static void log_info(const char *format, ...)
-{
-    printf("2 %ld ", log_count++);
-    va_list args;
-    va_start(args, format);
-    vprintf(format, args);
-    va_end(args);
-    printf("\n");
-}
-static void log_warn(const char *format, ...)
-{
-    printf("3 %ld ", log_count++);
-    va_list args;
-    va_start(args, format);
-    vprintf(format, args);
-    va_end(args);
-    printf("\n");
-}
-static void log_debug(const char *format, ...)
-{
-    printf("4 %ld ", log_count++);
-    va_list args;
-    va_start(args, format);
-    vprintf(format, args);
-    va_end(args);
-    printf("\n");
-}
-static void log_error(const char *format, ...)
-{
-    printf("5 %ld ", log_count++);
-    va_list args;
-    va_start(args, format);
-    vprintf(format, args);
-    va_end(args);
-    printf("\n");
-}
+    public:
+        static void trace(const char* cat, const char *format, ...);
+        static void info(const char* cat, const char *format, ...);
+        static void warn(const char* cat, const char *format, ...);
+        static void debug(const char* cat, const char *format, ...);
+        static void error(const char* cat, const char *format, ...);
+        static void start();
+    private:
+        static void logger_task(void *pvParameters);
+        static bool isLoggerTaskRunning();
+        const char* category;
+        static bool log_started;
+};

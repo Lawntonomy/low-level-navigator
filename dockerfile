@@ -32,7 +32,7 @@ RUN git clone --branch master https://github.com/raspberrypi/picotool.git $PICO_
     git submodule update --init
 
 # Clone FreeRTOS
-RUN git clone --branch master https://github.com/raspberrypi/FreeRTOS-Kernel.git $FreeRTOS_PATH && \
+RUN git clone --branch main https://github.com/raspberrypi/FreeRTOS-Kernel.git $FreeRTOS_PATH && \
     cd $FreeRTOS_PATH && \
     git submodule update --init
 
@@ -43,4 +43,6 @@ WORKDIR /workspace
 CMD mkdir -p build && cd build && cmake .. -DPICO_SDK_PATH=$PICO_SDK_PATH \
                                         -DPICO_BOARD=pico2 \
                                         -Dpicotool_DIR=$PICO_TOOL_PATH \
+                                        -DFREERTOS_KERNEL_PATH=$FreeRTOS_PATH \
+                                        -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
                                         && make
