@@ -10,12 +10,10 @@ class PropulsionEngineClass {
     void control_loop(int32_t current_rpm);
 
   private:
-    
-
     int32_t target_rpm;
     float error_rpm;
     float prior_error;
-    int32_t output =0;
+    int32_t output = 0;
     float integral_rpm;
 
     float kp;
