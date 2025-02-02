@@ -1,9 +1,10 @@
 #pragma once
 #include "pico/stdlib.h"
 
-namespace config_defines {
-namespace config_1 {
-enum class gpio_num {
+namespace gpio
+{
+enum class pins
+{
     right_pwm_pin = 3,
     right_forward_pin = 4,
     right_backward_pin = 5,
@@ -12,10 +13,10 @@ enum class gpio_num {
     left_backward_pin = 8,
     driver_enable_pin = 2,
     right_encoder_pin = 10,
-    left_encoder_pin = 11
+    left_encoder_pin = 11,
+    neopixel_pin = 15
 };
 
 const uint16_t pwm_frequency = 1000;
 const float encoder_ticks = 20.0;
-} // namespace config_1
-} // namespace config_defines
+} // namespace gpio

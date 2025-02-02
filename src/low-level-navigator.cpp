@@ -1,45 +1,99 @@
 /**
- * Copyright (c) 2022 Raspberry Pi (Trading) Ltd.
+ * Copyright (c) 2023 Raspberry Pi (Trading) Ltd.
  *
  * SPDX-License-Identifier: BSD-3-Clause
  */
-
-#include "FreeRTOS.h"
-#include "hardware_drivers/gpio_driver.hpp"
-#include "pico/multicore.h"
+#include <cmath>
+#include <stdio.h>
+#include "hardware/clocks.h"
 #include "pico/stdlib.h"
-#include "queue.h"
-#include "task.h"
-#include "utility/logger.h"
-// Stack sizes of our threads in words (4 bytes)
-#define MIN_STACK_SIZE configMINIMAL_STACK_SIZE
 
-static const char* category = "gpio_driver";
-// TaskHandle_t main_task;
+#include "hardware_drivers/encoder.hpp"
+#include "hardware_drivers/gpio_defines.h"
+#include "hardware_drivers/pwm.h"
+#include "high_level_drivers/pid.hpp"
 
-void main_task(void* pvParameters) {
-    Log::info(category, "Main task started");
-
-    GpioDriver gpio_driver;
-    gpio_driver.gpio_start();
-
-    for (;;) { vTaskDelay(10000); }
-}
-
-void vLaunch(void) {
-    TaskHandle_t task;
-    Log::info(category, "Launching initial tasks");
-    xTaskCreate(main_task, "main_task", MIN_STACK_SIZE, NULL,
-                tskIDLE_PRIORITY + 2UL, NULL);
-
-    /* Start the tasks and timer running. */
-    vTaskStartScheduler();
-}
-
-int main(void) {
+float left_target = 25.0;
+float right_target = -50.0;
+int main()
+{
+    PIO pio[] = {pio1, pio2};
+    uint sm[] = {0, 1, 2, 3};
     stdio_init_all();
+    printf("Starting autonomy\n");
 
-    vLaunch();
+    gpio_init(static_cast<uint>(gpio::pins::driver_enable_pin));
+    gpio_init(static_cast<uint>(gpio::pins::left_forward_pin));
+    gpio_init(static_cast<uint>(gpio::pins::right_forward_pin));
+    gpio_init(static_cast<uint>(gpio::pins::left_backward_pin));
+    gpio_init(static_cast<uint>(gpio::pins::right_backward_pin));
 
-    return 0;
+    gpio_set_dir(static_cast<uint>(gpio::pins::driver_enable_pin), true);
+    gpio_set_dir(static_cast<uint>(gpio::pins::left_forward_pin), true);
+    gpio_set_dir(static_cast<uint>(gpio::pins::right_forward_pin), true);
+    gpio_set_dir(static_cast<uint>(gpio::pins::left_backward_pin), true);
+    gpio_set_dir(static_cast<uint>(gpio::pins::right_backward_pin), true);
+
+    gpio_put(static_cast<uint>(gpio::pins::driver_enable_pin), true);
+
+    encoder::init(pio[0], sm[0]);
+    pwm::init(pio[0], sm[2]);
+
+    PidClass pidLeft(32.0, 0.0, 0.0);
+    PidClass pidRight(32.0, 0.0, 0.0);
+    pidLeft.set_max_output(65000);
+    pidLeft.set_min_output(-65000);
+    pidRight.set_max_output(65000);
+    pidRight.set_min_output(-65000);
+
+    pwm::pio_pwm_set_period(pio[0], sm[2], (1u << 16) - 1);
+    pwm::pio_pwm_set_period(pio[0], sm[3], (1u << 16) - 1);
+
+    // left_target = 5.0;
+    bool left_backward_state = false;
+    bool right_backward_state = false;
+    for (;;)
+    {
+
+        float left_rpm = encoder::get_left_rpm(pio[0], sm[0]);
+        float right_rpm = encoder::get_right_rpm(pio[0], sm[1]);
+
+        if (left_backward_state == true)
+        {
+            left_rpm = 0.0 - left_rpm;
+        }
+
+        if (right_backward_state == true)
+        {
+            right_rpm = 0.0 - right_rpm;
+        }
+
+        float left_command = pidLeft.control_loop(left_rpm, left_target);
+        float right_command = pidRight.control_loop(right_rpm, right_target);
+
+        pidLeft.set_max_output(left_rpm > -0.5 ? 65000.0 : 0.0);
+        pidLeft.set_min_output(left_rpm < 0.5 ? -65000.0 : 0.0);
+        pidRight.set_max_output(right_rpm > -0.5 ? 65000.0 : 0.0);
+        pidRight.set_min_output(right_rpm < 0.5 ? -65000.0 : 0.0);
+
+        pwm::pio_pwm_set_level(pio[0], sm[2], static_cast<uint32_t>(abs(left_command)));
+        pwm::pio_pwm_set_level(pio[0], sm[3], static_cast<uint32_t>(abs(right_command)));
+
+        if (left_rpm == 0.0)
+        {
+            left_backward_state = left_target < 0.0;
+            gpio_put(static_cast<uint>(gpio::pins::left_forward_pin), !left_backward_state);
+            gpio_put(static_cast<uint>(gpio::pins::left_backward_pin), left_backward_state);
+        }
+        if (right_rpm == 0.0)
+        {
+            right_backward_state = right_target < 0.0;
+            gpio_put(static_cast<uint>(gpio::pins::right_forward_pin), !right_backward_state);
+            gpio_put(static_cast<uint>(gpio::pins::right_backward_pin), right_backward_state);
+        }
+
+        printf("%f\t%f\t%f\t%f\t%f\t%f\n", left_target, left_rpm, right_target, right_rpm,
+               left_command, right_command);
+        sleep_ms(50);
+    }
 }

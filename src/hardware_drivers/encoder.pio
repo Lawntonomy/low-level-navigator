@@ -1,0 +1,45 @@
+
+
+.program encoder
+
+mov y, null
+mov x, null
+low_loop:               ; When pin is low, it stays in this loop
+    jmp pin, high_loop  ; jump to high loop if pin is high
+    MOV Y, ~Y           ; 
+    JMP Y--, increment_cont
+increment_cont:
+    MOV Y, ~Y
+jmp low_loop
+high_loop: ;when pin is high, it is in this loop
+    MOV Y, ~Y
+    JMP Y--, increment_cont2
+increment_cont2:
+    MOV Y, ~Y   [1]
+    jmp pin, high_loop
+push_to_buffer: ;when pin goes from high -> low
+    mov isr, y
+	push
+
+% c-sdk {
+	#include "hardware/clocks.h"
+	#include "hardware/gpio.h"
+    #include "stdio.h"
+static inline void encoder_program_init(PIO pio, uint sm, uint offset, uint pin)
+{
+    pio_gpio_init(pio, pin);
+    gpio_pull_up(pin);
+	pio_sm_config c = encoder_program_get_default_config(offset);
+    sm_config_set_in_pins(&c, pin); // for WAIT, IN
+    sm_config_set_jmp_pin(&c, pin); // for JMP
+    sm_config_set_in_shift(&c, false, false, 0);
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
+    float div = (float)clock_get_hz(clk_sys) / (5.0 * 1000.0);
+    
+    sm_config_set_clkdiv(&c, div);
+
+	pio_sm_init(pio, sm, offset, &c);
+	pio_sm_set_enabled(pio, sm, true);
+}
+
+%}
