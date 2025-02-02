@@ -37,8 +37,8 @@ target_sources(
     ${CMAKE_CURRENT_SOURCE_DIR}/src/utility/logger.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/high_level_drivers/propulsion_engine.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/high_level_drivers/pid.cpp
-
     ${CMAKE_CURRENT_SOURCE_DIR}/src/hardware_drivers/gpio_driver.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/hardware_drivers/hardware_defines.cpp
 
 )
 

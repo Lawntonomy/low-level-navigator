@@ -12,8 +12,7 @@ class GpioDriver
     // usage
   public:
     bool is_hardware_ready();
-    static std::vector<uint32_t>;
-    get_time_slices(config_defines::config_1::gpio_num gpio);
+    static std::vector<uint32_t> get_time_slices(config_defines::config_1::gpio_num gpio);
     // tasks
   private:
     static void led_heartbeat_task(void* parameter);

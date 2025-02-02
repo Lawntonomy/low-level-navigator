@@ -6,6 +6,7 @@
 
 #include "FreeRTOS.h"
 #include "hardware_drivers/gpio_driver.hpp"
+#include "high_level_drivers/propulsion_engine.hpp"
 #include "pico/multicore.h"
 #include "pico/stdlib.h"
 #include "queue.h"
@@ -24,9 +25,13 @@ void main_task(void* pvParameters)
     GpioDriver gpio_driver;
     gpio_driver.gpio_start();
 
+    PropulsionEngineClass prop_engine;
+
+    prop_engine.start();
+
     for (;;)
     {
-        vTaskDelay(10000);
+        vTaskDelay(10000 / portTICK_PERIOD_MS);
     }
 }
 

@@ -6,8 +6,11 @@
 #include "queue.h"
 #include "task.h"
 #include "utility/logger.h"
-std::map<uint, QueueHandle_t> irq_queue;
+
 static const char* category = "gpio_driver";
+std::map<uint, QueueHandle_t> irq_queue;
+QueueHandle_t gpio_update_queue;
+QueueHandle_t neo_pixel_queue;
 
 GpioDriver::GpioDriver() : hardware_ready(false)
 {
@@ -27,24 +30,29 @@ void GpioDriver::gpio_start()
     init_pwm_output_pin(static_cast<uint>(config_defines::config_1::gpio_num::left_pwm_pin),
                         config_defines::config_1::pwm_frequency);
 
+    init_freq_input_pin(static_cast<uint>(config_defines::config_1::gpio_num::left_encoder_pin));
+    init_freq_input_pin(static_cast<uint>(config_defines::config_1::gpio_num::right_encoder_pin));
     hardware::gpio_update_queue = xQueueCreate(25, sizeof(hardware::gpio_update));
     assert((void("failed to init:  gpio_update queue"), hardware::gpio_update_queue != nullptr));
+    Log::info(category, "gpio_update_queue created");
 
     hardware::neo_pixel_queue = xQueueCreate(10, sizeof(hardware::neopixel_update));
-    assert(
-        (void("failed to init:  neopixel_update queue"), hardware::gpio_update_queue != nullptr));
+    assert((void("failed to init:  neopixel_update queue"), hardware::neo_pixel_queue != nullptr));
+    Log::info(category, "neo_pixel_queue created");
 
-    irq_queue[static_cast<uint>(config_defines::config_1::gpio_num::left_encoder_pin)] =
+    hardware::irq_queue[static_cast<uint>(config_defines::config_1::gpio_num::left_encoder_pin)] =
         xQueueCreate(25, sizeof(uint16_t));
-    assert((void("failed to init:  left_encoder queue"),
-            irq_queue[static_cast<uint>(config_defines::config_1::gpio_num::left_encoder_pin)] !=
-                nullptr));
+    assert((void("failed to init:  left_encoder left queue"),
+            hardware::irq_queue[static_cast<uint>(
+                config_defines::config_1::gpio_num::left_encoder_pin)] != nullptr));
+    Log::info(category, "irq_queue left created");
 
-    irq_queue[static_cast<uint>(config_defines::config_1::gpio_num::right_encoder_pin)] =
+    hardware::irq_queue[static_cast<uint>(config_defines::config_1::gpio_num::right_encoder_pin)] =
         xQueueCreate(25, sizeof(uint16_t));
-    assert((void("failed to init:  right_encoder queue"),
-            irq_queue[static_cast<uint>(config_defines::config_1::gpio_num::right_encoder_pin)] !=
-                nullptr));
+    assert((void("failed to init:  irq_queue right queue"),
+            hardware::irq_queue[static_cast<uint>(
+                config_defines::config_1::gpio_num::right_encoder_pin)] != nullptr));
+    Log::info(category, "irq_queue right created");
 
     xTaskCreate(GpioDriver::led_heartbeat_task, "led_heartbeat_task", 1000, this,
                 tskIDLE_PRIORITY + 2UL, NULL);
@@ -62,10 +70,6 @@ void GpioDriver::gpio_start()
     hardware_ready = true;
 }
 
-void GpioDriver::get_time_slices(uint16_t gpio)
-{
-}
-
 bool GpioDriver::is_hardware_ready()
 {
     return hardware_ready;
@@ -78,10 +82,10 @@ void GpioDriver::led_heartbeat_task(void* parameter)
     {
         flipper = true;
         gpio_put(PICO_DEFAULT_LED_PIN, flipper);
-        vTaskDelay(500);
+        vTaskDelay(500 / portTICK_PERIOD_MS);
         flipper = false;
         gpio_put(PICO_DEFAULT_LED_PIN, flipper);
-        vTaskDelay(500);
+        vTaskDelay(500 / portTICK_PERIOD_MS);
     }
 }
 
@@ -95,7 +99,7 @@ void GpioDriver::neopixel_status_task(void* parameter)
     for (;;)
     {
 
-        vTaskDelay(1000);
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
 }
 
@@ -113,13 +117,17 @@ void GpioDriver::update_gpio_task(void* parameter)
     while (update_loop)
     {
         // recieve from queue
+        assert((void("loop fail:  update_gpio"), hardware::gpio_update_queue != nullptr));
         if (xQueueReceive(hardware::gpio_update_queue, &update, 10))
         {
             // check if time and value makes sense
-            if (update.timestamp + 300 < (time_us_32() / 1000))
+            if (update.timestamp + 300 > (time_us_32() / 1000))
             {
+
                 if (update.max_value >= update.value)
                 {
+                    driver->gpio_updates[static_cast<uint>(update.pin)].timestamp =
+                        update.timestamp;
                     if (update.max_value == 1)
                     {
                         if (update.value !=
@@ -141,15 +149,10 @@ void GpioDriver::update_gpio_task(void* parameter)
                     }
                 }
             }
-        }
-
-        uint32_t current_time = time_us_32() / 1000;
-        for (auto& update_entry : driver->gpio_updates)
-        {
-            Log::error(category, "gpio_update has exited because pin: %d", update_entry.second.pin);
-
-            if (update_entry.second.timestamp + 300 < current_time)
+            else
             {
+                Log::error(category, "gpio_update has exited because pin: %d", update.pin);
+
                 for (auto& update_entry : driver->gpio_updates)
                 {
                     if (update_entry.second.max_value == 1)
@@ -211,12 +214,12 @@ void GpioDriver::init_gpio_input_pin(uint16_t gpio, bool pull_up, bool pull_down
 // this needs to sends gpio pin with timestamp
 void GpioDriver::frequency_irq(uint gpio, uint32_t event_mask)
 {
+    Log::info(category, "gpio: %u", gpio);
     static std::map<uint, uint32_t> last_reading;
     uint32_t current_reading = 0;
     current_reading = time_us_32();
     current_reading - last_reading[gpio];
     uint32_t to_queue = current_reading - last_reading[gpio];
-    QueueHandle_t queue = hardware::irq_queue[gpio];
-    xQueueSendFromISR(queue, &to_queue, NULL);
+    xQueueSendFromISR(hardware::irq_queue[gpio], &to_queue, NULL);
     last_reading[gpio] = current_reading;
 }
