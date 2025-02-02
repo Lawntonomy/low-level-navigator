@@ -3,7 +3,8 @@
 #include <stdio.h>
 #include <string>
 
-class Log {
+class Log
+{
   public:
     static void trace(const char* cat, const char* format, ...);
     static void info(const char* cat, const char* format, ...);
