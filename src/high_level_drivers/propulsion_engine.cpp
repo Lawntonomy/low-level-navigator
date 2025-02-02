@@ -1,55 +1,85 @@
 #include "propulsion_engine.hpp"
-#include <algorithm>
-#include "utility/logger.h"
+#include <cstring>
+#include "hardware_drivers/hardware_defines.hpp"
+#include "pid.hpp"
 
-static const char* category = "prop_engine";
-
-PropulsionEngineClass::PropulsionEngineClass(float kp_init, float ki_init, float kd_init)
-    : kp(kp_init), ki(ki_init), kd(kd_init)
+void PropulsionEngineClass::main_prop_task(void* parameter)
 {
-}
+    PropulsionEngineClass* prop = static_cast<PropulsionEngineClass*>(parameter);
 
-uint8_t PropulsionEngineClass::set_speed(uint16_t new_rpm)
-{
-    // turn this into a queue recieive
-    if (new_rpm < 200)
-    {
-        Log::info(category, "Set Speed to %d", new_rpm);
-        target_rpm = new_rpm;
-    }
-    else
-    {
-        Log::error(category, "Speed Command Invalid! Speed: %d", new_rpm);
-    }
-}
+    PidClass pid_left(32.0, 0.0, 0.0);
+    PidClass pid_right(32.0, 0.0, 0.0);
 
-void PropulsionEngineClass::control_loop(int32_t current_rpm)
-{
-    // any initialization
+    pid_left.set_max_output(65000);
+    pid_left.set_min_output(-65000);
+    pid_right.set_max_output(65000);
+    pid_right.set_min_output(-65000);
 
     for (;;)
     {
-        error_rpm = static_cast<float>(target_rpm - current_rpm);
+        auto [command_left_rpm, command_right_rpm] = prop->get_command_rpm();
+        // get target speed
+        // get current speed
+        prop->update_rpm(config_defines::config_1::gpio_num::left_encoder_pin);
+        prop->update_rpm(config_defines::config_1::gpio_num::right_encoder_pin);
 
-        integral_rpm += error_rpm;
-        float derivative = error_rpm - prior_error;
-        int delta_output = static_cast<int>(kp * error_rpm + ki * integral_rpm + kd * derivative);
-
-        // clamp outputs to prevent overruns
-        if (output + delta_output >= 65000)
-        {
-            Log::warn(category, "commanding max value");
-            return output;
-        }
-        if (output - delta_output <= -65000)
-        {
-            Log::warn(category, "commanding min value");
-            return output;
-        }
-        prior_error = error_rpm;
-
-        vtaskdelay(50);
+        // run pid loop
+        pid_left.control_loop(
+            prop->rpms[static_cast<uint>(config_defines::config_1::gpio_num::left_encoder_pin)].rpm,
+            command_left_rpm);
+        pid_right.control_loop(
+            prop->rpms[static_cast<uint>(config_defines::config_1::gpio_num::right_encoder_pin)]
+                .rpm,
+            command_right_rpm);
+        // set pwm values
     }
+}
+
+void PropulsionEngineClass::update_rpm(config_defines::config_1::gpio_num gpio)
+{
+
+    uint gpio_uint = static_cast<uint>(gpio);
+    uint32_t current_timing = time_us_32();
+    uint32_t time_slice;
+    // get encoder values
+    while (xQueueReceive(hardware::irq_queue[gpio_uint], &time_slice, 0))
+    {
+        std::memcpy(&rpms[gpio_uint].readings[1], &rpms[gpio_uint].readings[0],
+                    (13) * sizeof(float));
+
+        rpms[gpio_uint].readings[0] = time_slice / 60000000.0;
+
+        std::memcpy(&rpms[gpio_uint].time_recorded[1], &rpms[gpio_uint].time_recorded[0],
+                    (13) * sizeof(uint32_t));
+        rpms[gpio_uint].time_recorded[0] = current_timing;
+    }
+
+    float times_summed = 0;
+    uint8_t iter = 0;
+
+    // averages time between 2 tick marks, up to 14 ticks, or 300ms,
+    // whichever comes first
+    while (rpms[gpio_uint].time_recorded[iter] + 300000 > current_timing && iter <= 14)
+    {
+        times_summed += rpms[gpio_uint].readings[iter];
+        iter++;
+    }
+
+    if (iter == 0)
+    {
+        rpms[gpio_uint].rpm = 0;
+        return;
+    }
+
+    float rpm =
+        (static_cast<float>(iter) / config_defines::config_1::encoder_ticks) / (times_summed);
+
+    rpms[gpio_uint].rpm = static_cast<uint>(rpm);
+}
+
+std::pair<uint32_t, uint32_t> PropulsionEngineClass::get_command_rpm()
+{
+    return std::make_pair(command_left_rpm, command_right_rpm);
 }
 
 void Propulsion::startup_test()

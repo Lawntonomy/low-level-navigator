@@ -1,4 +1,6 @@
 #pragma once
+#include <map>
+#include "hardware_drivers/configuration_defines.hpp"
 #include "pico/stdlib.h"
 
 class PropulsionEngineClass
@@ -6,17 +8,20 @@ class PropulsionEngineClass
   public:
     PropulsionEngineClass(float kp_init, float ki_init, float kd_init);
 
-    uint8_t set_speed(uint16_t new_rpm);
-    void control_loop(int32_t current_rpm);
+    std::pair<uint32_t, uint32_t> get_command_rpm();
 
   private:
-    int32_t target_rpm;
-    float error_rpm;
-    float prior_error;
-    int32_t output = 0;
-    float integral_rpm;
+    static void main_prop_task(void* parameter);
+    void update_rpm(config_defines::config_1::gpio_num gpio);
+    struct rpm_type
+    {
+        uint32_t rpm;
+        float readings[15];
+        float time_recorded[15];
+        uint32_t time_slice;
+    };
+    std::map<uint, rpm_type> rpms;
 
-    float kp;
-    float ki;
-    float kd;
+    uint32_t command_left_rpm;
+    uint32_t command_right_rpm;
 };

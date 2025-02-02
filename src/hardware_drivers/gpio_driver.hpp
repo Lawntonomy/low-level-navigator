@@ -1,5 +1,6 @@
 #pragma
 #include <map>
+#include <vector>
 #include "hardware_defines.hpp"
 #include "pico/stdlib.h"
 class GpioDriver
@@ -10,8 +11,9 @@ class GpioDriver
     void gpio_start();
     // usage
   public:
-    void get_time_slices(uint16_t gpio);
     bool is_hardware_ready();
+    static std::vector<uint32_t>;
+    get_time_slices(config_defines::config_1::gpio_num gpio);
     // tasks
   private:
     static void led_heartbeat_task(void* parameter);

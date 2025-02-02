@@ -109,8 +109,8 @@ void GpioDriver::update_gpio_task(void* parameter)
     hardware::gpio_update update;
 
     // run any checks nessesary
-
-    for (;;)
+    bool update_loop = true;
+    while (update_loop)
     {
         // recieve from queue
         if (xQueueReceive(hardware::gpio_update_queue, &update, 10))
@@ -143,11 +143,31 @@ void GpioDriver::update_gpio_task(void* parameter)
             }
         }
 
-        // check if any gpio have timed out//
-        // turn off all gpio
-        // exit loop
-    }
+        uint32_t current_time = time_us_32() / 1000;
+        for (auto& update_entry : driver->gpio_updates)
+        {
+            Log::error(category, "gpio_update has exited because pin: %d", update_entry.second.pin);
 
+            if (update_entry.second.timestamp + 300 < current_time)
+            {
+                for (auto& update_entry : driver->gpio_updates)
+                {
+                    if (update_entry.second.max_value == 1)
+                    {
+                        gpio_put(static_cast<uint>(update_entry.second.pin), 0);
+                    }
+                    else
+                    {
+                        pwm_set_gpio_level(static_cast<uint>(update_entry.second.pin), 0);
+                    }
+                    Log::error(category, "pin: %u, value: %u, timestamp: %u",
+                               update_entry.second.pin, update_entry.second.value,
+                               update_entry.second.timestamp);
+                }
+                update_loop = false;
+            }
+        }
+    }
     Log::error(category, "gpio_update has exited");
     vTaskDelete(NULL);
 }
@@ -196,7 +216,7 @@ void GpioDriver::frequency_irq(uint gpio, uint32_t event_mask)
     current_reading = time_us_32();
     current_reading - last_reading[gpio];
     uint32_t to_queue = current_reading - last_reading[gpio];
-    QueueHandle_t queue = irq_queue[gpio];
+    QueueHandle_t queue = hardware::irq_queue[gpio];
     xQueueSendFromISR(queue, &to_queue, NULL);
     last_reading[gpio] = current_reading;
 }

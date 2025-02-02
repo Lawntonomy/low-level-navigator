@@ -1,4 +1,5 @@
 #pragma once
+#include <map>
 #include "FreeRTOS.h"
 #include "configuration_defines.hpp"
 #include "pico/stdlib.h"
@@ -42,6 +43,7 @@ struct neopixel_update
     };
 };
 
+static std::map<uint, QueueHandle_t> irq_queue;
 static QueueHandle_t gpio_update_queue;
 static QueueHandle_t neo_pixel_queue;
 } // namespace hardware
