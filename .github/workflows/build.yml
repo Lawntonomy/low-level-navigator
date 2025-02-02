@@ -18,7 +18,7 @@ jobs:
       uses: actions/checkout@v2
 
     - name: Install clang-format
-      run: sudo apt-get install -y clang-format
+      run: sudo apt-get update && sudo apt-get install -y clang-format
 
     - name: Run clang-format
       run: |
@@ -48,7 +48,7 @@ jobs:
       run: docker run --rm -v ${{ github.workspace }}:/workspace low-level-navigator 
 
     - name: Upload build artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: low-level-navigator
         path: build/low-level-nav.uf2
