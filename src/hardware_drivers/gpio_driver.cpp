@@ -211,14 +211,11 @@ void GpioDriver::init_gpio_output_pin(uint16_t gpio)
 void GpioDriver::init_gpio_input_pin(uint16_t gpio, bool pull_up, bool pull_down)
 {
 }
-// this needs to sends gpio pin with timestamp
+// this needs to send gpio pin with timestamp
 void GpioDriver::frequency_irq(uint gpio, uint32_t event_mask)
 {
-    Log::info(category, "gpio: %u", gpio);
     static std::map<uint, uint32_t> last_reading;
-    uint32_t current_reading = 0;
-    current_reading = time_us_32();
-    current_reading - last_reading[gpio];
+    auto current_reading = time_us_32();
     uint32_t to_queue = current_reading - last_reading[gpio];
     xQueueSendFromISR(hardware::irq_queue[gpio], &to_queue, NULL);
     last_reading[gpio] = current_reading;
