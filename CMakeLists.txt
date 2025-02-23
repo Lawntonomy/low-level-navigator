@@ -68,12 +68,14 @@ target_link_libraries(${PROJECT_NAME}
   pico_multicore
   FreeRTOS-Kernel-Heap4
   pico_stdlib
-  hardware_pwm)
+  hardware_pwm
+  hardware_i2c)
 
-  target_compile_definitions(${PROJECT_NAME} PRIVATE
-	PICO_DEFAULT_UART_TX_PIN=16
-	PICO_DEFAULT_UART_RX_PIN=17
-	)
-
+  target_compile_definitions(low-level-nav PRIVATE
+  PICO_DEFAULT_UART_TX_PIN=16
+  PICO_DEFAULT_UART_RX_PIN=17
+  PICO_DEFAULT_I2C_SDA_PIN=20
+  PICO_DEFAULT_I2C_SCL_PIN=21
+  )
 # create map/bin/hex/uf2 file in addition to ELF.
 pico_add_extra_outputs(${PROJECT_NAME})

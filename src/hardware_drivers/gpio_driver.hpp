@@ -10,7 +10,6 @@ class GpioDriver
     void gpio_start();
     // usage
   public:
-    void get_time_slices(uint16_t gpio);
     bool is_hardware_ready();
     // tasks
   private:

@@ -62,10 +62,6 @@ void GpioDriver::gpio_start()
     hardware_ready = true;
 }
 
-void GpioDriver::get_time_slices(uint16_t gpio)
-{
-}
-
 bool GpioDriver::is_hardware_ready()
 {
     return hardware_ready;
@@ -187,16 +183,4 @@ void GpioDriver::init_gpio_output_pin(uint16_t gpio)
 
 void GpioDriver::init_gpio_input_pin(uint16_t gpio, bool pull_up, bool pull_down)
 {
-}
-// this needs to sends gpio pin with timestamp
-void GpioDriver::frequency_irq(uint gpio, uint32_t event_mask)
-{
-    static std::map<uint, uint32_t> last_reading;
-    uint32_t current_reading = 0;
-    current_reading = time_us_32();
-    current_reading - last_reading[gpio];
-    uint32_t to_queue = current_reading - last_reading[gpio];
-    QueueHandle_t queue = irq_queue[gpio];
-    xQueueSendFromISR(queue, &to_queue, NULL);
-    last_reading[gpio] = current_reading;
 }

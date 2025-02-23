@@ -1,7 +1,7 @@
 #pragma once
 #include "FreeRTOS.h"
-#include "configuration_defines.hpp"
 #include "pico/stdlib.h"
+#include "pinout_defines.hpp"
 #include "queue.h"
 
 namespace hardware
