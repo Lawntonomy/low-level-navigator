@@ -2,11 +2,11 @@
 #include <map>
 #include "hardware_defines.hpp"
 #include "pico/stdlib.h"
-class GpioDriver
-{
+class GpioDriver {
     // initialization
   public:
-    GpioDriver();
+    GpioDriver(/* args */);
+    ~GpioDriver();
     void gpio_start();
     // usage
   public:
