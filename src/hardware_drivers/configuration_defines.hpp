@@ -1,12 +1,9 @@
 #pragma once
 #include "pico/stdlib.h"
 
-namespace config_defines
-{
-namespace config_1
-{
-enum class gpio_num
-{
+namespace config_defines {
+namespace config_1 {
+enum class gpio_num {
     right_pwm_pin = 3,
     right_forward_pin = 4,
     right_backward_pin = 5,
