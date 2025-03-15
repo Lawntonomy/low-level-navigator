@@ -1,15 +1,15 @@
 #include "gpio_driver.hpp"
-#include <cassert>
 #include <pico/time.h>
 #include "FreeRTOS.h"
 #include "hardware/pwm.h"
 #include "queue.h"
 #include "task.h"
 #include "utility/logger.h"
+
 std::map<uint, QueueHandle_t> irq_queue;
 static const char* category = "gpio_driver";
 
-GpioDriver::GpioDriver(/* args */) : hardware_ready(false) {}
+GpioDriver::GpioDriver(/* args */) {}
 
 GpioDriver::~GpioDriver() {}
 
@@ -35,52 +35,23 @@ void GpioDriver::gpio_start() {
 
     hardware::gpio_update_queue =
         xQueueCreate(25, sizeof(hardware::gpio_update));
-    assert((void("failed to init:  gpio_update queue"),
-            hardware::gpio_update_queue == nullptr));
-
     hardware::neo_pixel_queue =
         xQueueCreate(10, sizeof(hardware::neopixel_update));
-    assert((void("failed to init:  neopixel_update queue"),
-            hardware::gpio_update_queue == nullptr));
-
     irq_queue[static_cast<uint>(
         config_defines::config_1::gpio_num::left_encoder_pin)] =
         xQueueCreate(25, sizeof(uint16_t));
-    assert((void("failed to init:  left_encoder queue"),
-            irq_queue[static_cast<uint>(
-                config_defines::config_1::gpio_num::left_encoder_pin)] ==
-                nullptr));
-
     irq_queue[static_cast<uint>(
         config_defines::config_1::gpio_num::right_encoder_pin)] =
         xQueueCreate(25, sizeof(uint16_t));
-    assert((void("failed to init:  right_encoder queue"),
-            irq_queue[static_cast<uint>(
-                config_defines::config_1::gpio_num::right_encoder_pin)] ==
-                nullptr));
-
     xTaskCreate(GpioDriver::led_heartbeat_task, "led_heartbeat_task", 1000,
                 this, tskIDLE_PRIORITY + 2UL, NULL);
-    assert((void("failed to init:  led_heartbeat_task"),
-            GpioDriver::led_heartbeat_task == nullptr));
-
     xTaskCreate(GpioDriver::neopixel_status_task, "neopixel_status_task", 1000,
                 this, tskIDLE_PRIORITY + 2UL, NULL);
-    assert((void("failed to init:  neopixel_status_task"),
-            GpioDriver::neopixel_status_task == nullptr));
-
     xTaskCreate(GpioDriver::update_gpio_task, "update_gpio_task", 1000, this,
                 tskIDLE_PRIORITY + 2UL, NULL);
-    assert((void("failed to init:  update_gpio_task"),
-            GpioDriver::update_gpio_task == nullptr));
-    hardware_ready = true;
 }
 
 void GpioDriver::get_time_slices(uint16_t gpio) {}
-
-bool GpioDriver::is_hardware_ready() {
-    return hardware_ready;
-}
 
 void GpioDriver::led_heartbeat_task(void* parameter) {
     bool flipper = 0;
