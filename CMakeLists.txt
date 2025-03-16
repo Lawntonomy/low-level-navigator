@@ -44,7 +44,7 @@ target_sources(
     ${CMAKE_CURRENT_SOURCE_DIR}/src/hardware_drivers/pwm.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/utility/logger.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/high_level_drivers/pid.cpp
-    #${CMAKE_CURRENT_SOURCE_DIR}/src/hardware_drivers/pwm.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/high_level_drivers/navigator.cpp
 
 
 )

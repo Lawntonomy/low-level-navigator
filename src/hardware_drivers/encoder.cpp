@@ -1,18 +1,15 @@
 #include "encoder.hpp"
 #include "utility/logger.h"
 
-#define CAPTURE_DEPTH 8
-#define CAPTURE_RING_BITS 5
+#define CAPTURE_DEPTH 8     // (8 * 4 bytes = 32)
+#define CAPTURE_RING_BITS 5 // (1 << 5 = 32)
 
 // Aligned for the DMA ring address warp.
 uint32_t left_buffer[CAPTURE_DEPTH] __attribute__((aligned(32)));
 uint32_t right_buffer[CAPTURE_DEPTH] __attribute__((aligned(32)));
 
-// #define ARRAY_SIZE 8
 static const char* category = "encoder";
 
-// uint32_t left_buffer[ARRAY_SIZE] = {0};
-// uint32_t right_buffer[ARRAY_SIZE] = {0};
 void setup_dma(PIO pio, uint sm, uint32_t* array)
 {
     // DMA channel configuration
@@ -31,8 +28,6 @@ void setup_dma(PIO pio, uint sm, uint32_t* array)
                           0xFFFFFFFF,    // Transfer count
                           true           // Start immediately
     );
-
-    // Set DREQ to trigger DMA when FIFO has data
 }
 
 void encoder::init(PIO pio, uint sm_index)
@@ -41,17 +36,14 @@ void encoder::init(PIO pio, uint sm_index)
     int offset1 = pio_add_program(pio, &encoder_program);
     assert(offset1 > 0);
     encoder_program_init(pio, sm_index, offset1, static_cast<uint>(gpio::pins::left_encoder_pin));
-    setup_dma(pio, sm_index, left_buffer);
 
     encoder_program_init(pio, sm_index + 1, offset1,
                          static_cast<uint>(gpio::pins::right_encoder_pin));
+
+    setup_dma(pio, sm_index, left_buffer);
     setup_dma(pio, sm_index + 1, right_buffer);
-    // setup_dma(pio, sm_index, left_buffer);
-    // setup_dma(pio, sm_index + 1, right_buffer);
     Log::info(category, "init encoder complete");
 }
-
-const float cycles_per_loop = 5.0;
 
 float encoder::get_left_rpm(PIO pio, uint sm)
 {
@@ -61,9 +53,10 @@ float encoder::get_left_rpm(PIO pio, uint sm)
         total_for_average += left_buffer[i];
     }
 
+    // prevent divide by 0
     if (total_for_average > 0.0)
     {
-        float rpm = (60.0f * 1000.0f) / ((float)(total_for_average / CAPTURE_DEPTH) * 20);
+        float rpm = (60.0f * 1000.0f) / ((total_for_average / (float)CAPTURE_DEPTH) * 20.0f);
         return rpm;
     }
     return 0.0;
