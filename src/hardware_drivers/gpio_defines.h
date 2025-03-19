@@ -17,6 +17,4 @@ enum class pins
     neopixel_pin = 15
 };
 
-const uint16_t pwm_frequency = 1000;
-const float encoder_ticks = 20.0;
 } // namespace gpio

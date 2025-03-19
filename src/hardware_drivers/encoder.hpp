@@ -1,9 +1,4 @@
 #include "encoder.pio.h"
-#include "hardware/clocks.h"
-#include "hardware/dma.h"
-#include "hardware/pio.h"
-#include "hardware/timer.h"
-#include "hardware_drivers/gpio_defines.h"
 #include "pico/stdlib.h"
 
 namespace encoder

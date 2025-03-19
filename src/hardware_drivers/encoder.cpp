@@ -1,4 +1,11 @@
 #include "encoder.hpp"
+
+#include "hardware/clocks.h"
+#include "hardware/dma.h"
+#include "hardware/pio.h"
+#include "hardware/timer.h"
+#include "hardware_drivers/gpio_defines.h"
+
 #include "utility/logger.h"
 
 #define CAPTURE_DEPTH 8     // (8 * 4 bytes = 32)
@@ -10,7 +17,7 @@ uint32_t right_buffer[CAPTURE_DEPTH] __attribute__((aligned(32)));
 
 static const char* category = "encoder";
 
-void setup_dma(PIO pio, uint sm, uint32_t* array)
+static void setup_dma(PIO pio, uint sm, uint32_t* array)
 {
     // DMA channel configuration
     int dma_chan = dma_claim_unused_channel(true);
@@ -25,7 +32,7 @@ void setup_dma(PIO pio, uint sm, uint32_t* array)
     dma_channel_configure(dma_chan, &c,
                           array,         // Destination pointer (buffer array)
                           &pio->rxf[sm], // Source pointer (PIO RX FIFO)
-                          0xFFFFFFFF,    // Transfer count
+                          0xF0000001,    // Transfer count
                           true           // Start immediately
     );
 }
