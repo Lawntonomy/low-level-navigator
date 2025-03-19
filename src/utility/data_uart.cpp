@@ -1,3 +1,5 @@
+#include "data_uart.hpp"
+
 #include "hardware/dma.h"
 #include "hardware/uart.h"
 #include "pico/stdlib.h"
@@ -20,7 +22,7 @@ static const char* category = "uart1";
 int dma_tx_chan;
 int dma_rx_chan;
 
-void setup_dma_uart()
+void uart::init()
 {
     // Initialize UART
     uart_init(UART_ID, BAUD_RATE);
@@ -59,20 +61,5 @@ void setup_dma_uart()
     );
 }
 
-int main()
-{
-    stdio_init_all();
-    setup_dma_uart();
-
-    sleep_ms(2000); // Give time for serial console to be ready
-
-    printf("Starting UART DMA example...\n");
-
-    // Start TX DMA transfer
-    dma_channel_start(dma_tx_chan);
-
-    while (true)
-    {
-        tight_loop_contents(); // Main loop does nothing, DMA handles communication
-    }
-}
+// setup_dma_uart();
+// dma_channel_start(dma_tx_chan);
