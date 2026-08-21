@@ -1,0 +1,689 @@
+# RP2350 Datasheet -- Section Index
+
+Generated from `RP-008373-DS-2-rp2350-datasheet.pdf` by `scripts/gen-datasheet-index.py`.
+Section titles and page numbers only -- the PDF remains the source of truth.
+
+## Reading the datasheet
+
+**PDF page = printed page + 1.** Page numbers printed in the footer (and listed
+in the datasheet's own ToC) run one behind the PDF page index. Both are given below.
+
+Two ways to read it, both available to the `rp2350-researcher` agent:
+
+| Method | Returns | Limit |
+| --- | --- | --- |
+| `Read` with `pages: "877-878"` | Rendered pages, including figures and block diagrams | 20 pages per call |
+| `pdftotext -f 877 -l 878 -layout <pdf> -` | Text only, greppable across all pages | none |
+
+Use `Read` when a diagram, register layout, or table matters -- which for PIO and DMA
+is most of the time. Use `pdftotext` piped to `grep` to locate a term across the whole
+document before committing a 20-page read to it.
+
+## Start here
+
+**PIO -- encoder capture and motor PWM**
+
+- 11. PIO — printed 876, **PDF 877**
+- 11.2.1. PIO programs — printed 879, **PDF 880**
+- 11.2.7. IRQ flags — printed 884, **PDF 885**
+- 11.2.8. Interactions between state machines — printed 885, **PDF 886**
+- 11.3. PIO assembler (pioasm) — printed 885, **PDF 886**
+- 11.4. Instruction Set — printed 889, **PDF 890**
+- 11.5.3. FIFO joining — printed 905, **PDF 906**
+- 11.5.5. Clock Dividers — printed 911, **PDF 912**
+- 11.5.6. GPIO mapping — printed 911, **PDF 912**
+
+**DMA -- encoder ring buffers**
+
+- 12.6. DMA — printed 1094, **PDF 1095**
+- 12.13.4. DMA DREQ interface — printed 1222, **PDF 1223**
+- 4.4.3. Streaming DMA interface — printed 345, **PDF 346**
+
+**GPIO**
+
+- 9. GPIO — printed 587, **PDF 588**
+- 9.8. Processor GPIO controls (SIO) — printed 597, **PDF 598**
+- 9.10.2. Enable a GPIO interrupt — printed 603, **PDF 604**
+
+**Clocks, timers, watchdog**
+
+- 8. Clocks — printed 513, **PDF 514**
+- 8.5. Tick generators — printed 570, **PDF 571**
+- 12.8. System timers — printed 1182, **PDF 1183**
+- 12.9. Watchdog — printed 1193, **PDF 1194**
+- 12.9.3. Watchdog counter — printed 1193, **PDF 1194**
+- 12.9.4. Control watchdog reset levels — printed 1194, **PDF 1195**
+
+**Multicore and cross-core state**
+
+- 3.1. SIO — printed 36, **PDF 37**
+- 3.1.2. CPUID — printed 38, **PDF 39**
+- 3.1.4. Hardware spinlocks — printed 41, **PDF 42**
+- 3.1.5. Inter-processor FIFOs (Mailboxes) — printed 42, **PDF 43**
+- 3.1.6. Doorbells — printed 42, **PDF 43**
+- 2.1.3. Atomic register access — printed 26, **PDF 27**
+
+**Errata -- check before trusting the prose**
+
+- Appendix E: Errata — printed 1357, **PDF 1358**
+
+## Full index
+
+Indented by section depth. `printed` / **`PDF`**.
+
+  - Colophon — 1 / **2**
+  - Legal disclaimer notice — 1 / **2**
+- 1. Introduction — 13 / **14**
+  - 1.1. The chip — 14 / **15**
+  - 1.2. Pinout reference — 15 / **16**
+    - 1.2.1. Pin locations — 15 / **16**
+    - 1.2.2. Pin descriptions — 16 / **17**
+    - 1.2.3. GPIO functions (Bank 0) — 17 / **18**
+    - 1.2.4. GPIO functions (Bank 1) — 21 / **22**
+  - 1.3. Why is the chip called RP2350? — 22 / **23**
+  - 1.4. Version History — 23 / **24**
+- 2. System bus — 24 / **25**
+  - 2.1. Bus fabric — 24 / **25**
+    - 2.1.1. Bus priority — 25 / **26**
+    - 2.1.2. Bus security filtering — 25 / **26**
+    - 2.1.3. Atomic register access — 26 / **27**
+    - 2.1.4. APB bridge — 26 / **27**
+    - 2.1.5. Narrow IO register writes — 27 / **28**
+    - 2.1.6. Global Exclusive Monitor — 28 / **29**
+    - 2.1.7. Bus performance counters — 30 / **31**
+  - 2.2. Address map — 30 / **31**
+    - 2.2.1. ROM — 30 / **31**
+    - 2.2.2. XIP — 30 / **31**
+    - 2.2.3. SRAM — 31 / **32**
+    - 2.2.4. APB registers — 31 / **32**
+    - 2.2.5. AHB registers — 33 / **34**
+    - 2.2.6. Core-local peripherals (SIO) — 33 / **34**
+    - 2.2.7. Cortex-M33 private peripherals — 34 / **35**
+- 3. Processor subsystem — 35 / **36**
+  - 3.1. SIO — 36 / **37**
+    - 3.1.1. Secure and Non-secure SIO — 37 / **38**
+    - 3.1.2. CPUID — 38 / **39**
+    - 3.1.3. GPIO control — 39 / **40**
+    - 3.1.4. Hardware spinlocks — 41 / **42**
+    - 3.1.5. Inter-processor FIFOs (Mailboxes) — 42 / **43**
+    - 3.1.6. Doorbells — 42 / **43**
+    - 3.1.7. Integer divider — 43 / **44**
+    - 3.1.8. RISC-V platform timer — 43 / **44**
+    - 3.1.9. TMDS encoder — 44 / **45**
+    - 3.1.10. Interpolator — 44 / **45**
+    - 3.1.11. List of registers — 54 / **55**
+  - 3.2. Interrupts — 82 / **83**
+    - 3.2.1. Non-maskable interrupt (NMI) — 83 / **84**
+    - 3.2.2. Further reading on interrupts — 83 / **84**
+  - 3.3. Event signals (Arm) — 84 / **85**
+  - 3.4. Event signals (RISC-V) — 84 / **85**
+  - 3.5. Debug — 84 / **85**
+    - 3.5.1. Connecting to the SW-DP — 85 / **86**
+    - 3.5.2. Arm debug — 86 / **87**
+    - 3.5.3. RISC-V debug — 86 / **87**
+    - 3.5.4. Debug power domains — 87 / **88**
+    - 3.5.5. Software control of SWD pins — 87 / **88**
+    - 3.5.6. Self-hosted debug — 87 / **88**
+    - 3.5.7. Trace — 88 / **89**
+    - 3.5.8. Rescue reset — 90 / **91**
+    - 3.5.9. Security — 91 / **92**
+    - 3.5.10. RP-AP — 93 / **94**
+  - 3.6. Cortex-M33 coprocessors — 100 / **101**
+    - 3.6.1. GPIO coprocessor (GPIOC) — 101 / **102**
+    - 3.6.2. Double-precision coprocessor (DCP) — 104 / **105**
+    - 3.6.3. Redundancy coprocessor (RCP) — 112 / **113**
+    - 3.6.4. Floating point unit — 123 / **124**
+  - 3.7. Cortex-M33 processor — 123 / **124**
+    - 3.7.1. Features — 124 / **125**
+    - 3.7.2. Configuration — 124 / **125**
+    - 3.7.3. Compliance — 128 / **129**
+    - 3.7.4. Programmer’s model — 131 / **132**
+    - 3.7.5. List of registers — 148 / **149**
+  - 3.8. Hazard3 processor — 233 / **234**
+    - 3.8.1. Instruction set reference — 233 / **234**
+    - 3.8.2. Memory access — 278 / **279**
+    - 3.8.3. Memory protection — 279 / **280**
+    - 3.8.4. Interrupts and exceptions — 282 / **283**
+    - 3.8.5. Debug — 285 / **286**
+    - 3.8.6. Custom extensions — 286 / **287**
+    - 3.8.7. Instruction cycle counts — 296 / **297**
+    - 3.8.8. Configuration — 302 / **303**
+    - 3.8.9. Control and status registers — 304 / **305**
+  - 3.9. Arm/RISC-V architecture switching — 335 / **336**
+    - 3.9.1. Automatic switching — 335 / **336**
+    - 3.9.2. Mixed architecture combinations — 336 / **337**
+- 4. Memory — 337 / **338**
+  - 4.1. ROM — 337 / **338**
+  - 4.2. SRAM — 337 / **338**
+    - 4.2.1. Other on-chip memory — 338 / **339**
+  - 4.3. Boot RAM — 339 / **340**
+    - 4.3.1. List of registers — 339 / **340**
+  - 4.4. External flash and PSRAM (XIP) — 340 / **341**
+    - 4.4.1. XIP cache — 341 / **342**
+    - 4.4.2. QSPI Memory Interface (QMI) — 345 / **346**
+    - 4.4.3. Streaming DMA interface — 345 / **346**
+    - 4.4.4. Performance counters — 346 / **347**
+    - 4.4.5. List of XIP_CTRL registers — 346 / **347**
+    - 4.4.6. List of XIP_AUX registers — 350 / **351**
+  - 4.5. OTP — 352 / **353**
+- 5. Bootrom — 353 / **354**
+  - 5.1. Bootrom concepts — 354 / **355**
+    - 5.1.1. Secure and Non-secure — 354 / **355**
+    - 5.1.2. Partition tables — 354 / **355**
+    - 5.1.3. Flash permissions — 355 / **356**
+    - 5.1.4. Image definitions — 355 / **356**
+    - 5.1.5. Blocks and block loops — 356 / **357**
+    - 5.1.6. Block versioning — 357 / **358**
+    - 5.1.7. A/B versions — 357 / **358**
+    - 5.1.8. Hashing and signing — 357 / **358**
+    - 5.1.9. Load maps — 358 / **359**
+    - 5.1.10. Packaged binaries — 358 / **359**
+    - 5.1.11. Anti-rollback protection — 359 / **360**
+    - 5.1.12. Flash image boot — 359 / **360**
+    - 5.1.13. Flash partition boot — 360 / **361**
+    - 5.1.14. Partition-Table-in-Image boot — 360 / **361**
+    - 5.1.15. Flash boot slots — 360 / **361**
+    - 5.1.16. Flash update boot and version downgrade — 361 / **362**
+    - 5.1.17. Try before you buy — 362 / **363**
+    - 5.1.18. UF2 targeting — 362 / **363**
+    - 5.1.19. Address translation — 363 / **364**
+    - 5.1.20. Automatic architecture switching — 364 / **365**
+  - 5.2. Processor-controlled boot sequence — 365 / **366**
+    - 5.2.1. Boot outcomes — 365 / **366**
+    - 5.2.2. Sequence — 366 / **367**
+    - 5.2.3. POWMAN boot vector — 371 / **372**
+    - 5.2.4. Watchdog boot vector — 371 / **372**
+    - 5.2.5. RAM image boot — 372 / **373**
+    - 5.2.6. OTP boot — 373 / **374**
+    - 5.2.7. Flash boot — 373 / **374**
+    - 5.2.8. BOOTSEL (USB/UART) boot — 374 / **375**
+    - 5.2.9. Boot configuration (OTP) — 375 / **376**
+  - 5.3. Launching code on Processor Core 1 — 375 / **376**
+  - 5.4. Bootrom APIs — 376 / **377**
+    - 5.4.1. Locating the API functions — 376 / **377**
+    - 5.4.2. API function availability — 378 / **379**
+    - 5.4.3. API function return codes — 378 / **379**
+    - 5.4.4. API functions and exclusive access — 379 / **380**
+    - 5.4.5. SDK access to the API — 380 / **381**
+    - 5.4.6. Categorised list of API functions and ROM data — 380 / **381**
+    - 5.4.7. Alphabetical list of API functions and ROM data — 382 / **383**
+    - 5.4.8. API function listings — 383 / **384**
+  - 5.5. USB mass storage interface — 399 / **400**
+    - 5.5.1. The RP2350 drive — 399 / **400**
+    - 5.5.2. UF2 format details — 400 / **401**
+    - 5.5.3. UF2 targeting rules — 401 / **402**
+  - 5.6. USB PICOBOOT interface — 403 / **404**
+    - 5.6.1. Identifying the device — 403 / **404**
+    - 5.6.2. Identifying the interface — 404 / **405**
+    - 5.6.3. Identifying the endpoints — 404 / **405**
+    - 5.6.4. PICOBOOT Commands — 405 / **406**
+    - 5.6.5. Control requests — 410 / **411**
+  - 5.7. USB white-labelling — 412 / **413**
+    - 5.7.1. USB device descriptor — 413 / **414**
+    - 5.7.2. USB device strings — 413 / **414**
+    - 5.7.3. USB configuration descriptor — 413 / **414**
+    - 5.7.4. MSD drive — 413 / **414**
+    - 5.7.5. UF2 INDEX.HTM file — 413 / **414**
+    - 5.7.6. UF2 INFO_UF2.TXT file — 414 / **415**
+    - 5.7.7. SCSI Inquiry — 414 / **415**
+    - 5.7.8. Volume label simple example — 414 / **415**
+    - 5.7.9. Volume label in-depth example — 415 / **416**
+  - 5.8. UART boot — 416 / **417**
+    - 5.8.1. Baud rate and clock requirements — 416 / **417**
+    - 5.8.2. UART boot shell protocol — 416 / **417**
+    - 5.8.3. UART boot programming flow — 417 / **418**
+    - 5.8.4. Recovering from a stuck interface — 417 / **418**
+    - 5.8.5. Requirements for UART boot binaries — 418 / **419**
+  - 5.9. Metadata block details — 418 / **419**
+    - 5.9.1. Blocks and block loops — 418 / **419**
+    - 5.9.2. Common block items — 419 / **420**
+    - 5.9.3. Image definition items — 421 / **422**
+    - 5.9.4. Partition table items — 425 / **426**
+    - 5.9.5. Minimum viable image metadata — 428 / **429**
+  - 5.10. Example boot scenarios — 429 / **430**
+    - 5.10.1. Secure boot — 429 / **430**
+    - 5.10.2. Signed images — 430 / **431**
+    - 5.10.3. Packaged binaries — 433 / **434**
+    - 5.10.4. A/B booting — 433 / **434**
+    - 5.10.5. A/B booting with owned partitions — 435 / **436**
+    - 5.10.6. Custom bootloader — 437 / **438**
+    - 5.10.7. OTP bootloader — 439 / **440**
+    - 5.10.8. Rollback versions and bootloaders — 440 / **441**
+- 6. Power — 441 / **442**
+  - 6.1. Power supplies — 441 / **442**
+    - 6.1.1. Digital IO supply (IOVDD) — 441 / **442**
+    - 6.1.2. QSPI IO supply (QSPI_IOVDD) — 441 / **442**
+    - 6.1.3. Digital core supply (DVDD) — 441 / **442**
+    - 6.1.4. USB PHY and OTP supply (USB_OTP_VDD) — 442 / **443**
+    - 6.1.5. ADC supply (ADC_AVDD) — 442 / **443**
+    - 6.1.6. Core voltage regulator input supply (VREG_VIN) — 442 / **443**
+    - 6.1.7. On-chip voltage regulator analogue supply (VREG_AVDD) — 442 / **443**
+    - 6.1.8. Power supply sequencing — 443 / **444**
+  - 6.2. Power management — 443 / **444**
+    - 6.2.1. Core power domains — 443 / **444**
+    - 6.2.2. Power states — 444 / **445**
+    - 6.2.3. Power state transitions — 445 / **446**
+  - 6.3. Core voltage regulator — 448 / **449**
+    - 6.3.1. Operating modes — 448 / **449**
+    - 6.3.2. Software control — 449 / **450**
+    - 6.3.3. Power Manager control — 449 / **450**
+    - 6.3.4. Status — 450 / **451**
+    - 6.3.5. Current limit — 450 / **451**
+    - 6.3.6. Over temperature protection — 450 / **451**
+    - 6.3.7. Application circuit — 450 / **451**
+    - 6.3.8. External components and PCB layout requirements — 452 / **453**
+    - 6.3.9. List of registers — 457 / **458**
+  - 6.4. Power management (POWMAN) registers — 457 / **458**
+  - 6.5. Power reduction strategies — 488 / **489**
+    - 6.5.1. Top-level clock gates — 489 / **490**
+    - 6.5.2. SLEEP state — 489 / **490**
+    - 6.5.3. DORMANT state — 489 / **490**
+    - 6.5.4. Memory periphery power down — 490 / **491**
+    - 6.5.5. Full memory power down — 490 / **491**
+    - 6.5.6. Programmer’s model — 491 / **492**
+- 7. Resets — 494 / **495**
+  - 7.1. Overview — 494 / **495**
+  - 7.2. Changes from RP2040 — 494 / **495**
+  - 7.3. Chip-level resets — 495 / **496**
+    - 7.3.1. Chip-level reset table — 495 / **496**
+    - 7.3.2. Chip-level reset destinations — 496 / **497**
+    - 7.3.3. Chip-level reset sources — 496 / **497**
+  - 7.4. System resets (Power-on State Machine) — 497 / **498**
+    - 7.4.1. Reset sequence — 498 / **499**
+    - 7.4.2. Register control — 499 / **500**
+    - 7.4.3. Interaction with watchdog — 499 / **500**
+    - 7.4.4. List of registers — 499 / **500**
+  - 7.5. Subsystem resets — 503 / **504**
+    - 7.5.1. Overview — 503 / **504**
+    - 7.5.2. Programmer’s model — 503 / **504**
+    - 7.5.3. List of Registers — 505 / **506**
+  - 7.6. Power-on resets and brownout detection — 508 / **509**
+    - 7.6.1. Power-on reset (POR) — 509 / **510**
+    - 7.6.2. Brownout detection (BOD) — 509 / **510**
+    - 7.6.3. Supply monitor — 512 / **513**
+    - 7.6.4. List of registers — 512 / **513**
+- 8. Clocks — 513 / **514**
+  - 8.1. Overview — 513 / **514**
+    - 8.1.1. Changes between RP2350 revisions — 514 / **515**
+    - 8.1.2. Clock sources — 514 / **515**
+    - 8.1.3. Clock generators — 518 / **519**
+    - 8.1.4. Frequency counter — 522 / **523**
+    - 8.1.5. Resus — 522 / **523**
+    - 8.1.6. Programmer’s model — 523 / **524**
+    - 8.1.7. List of registers — 529 / **530**
+  - 8.2. Crystal oscillator (XOSC) — 554 / **555**
+    - 8.2.1. Overview — 554 / **555**
+    - 8.2.2. Changes from RP2040 — 556 / **557**
+    - 8.2.3. Usage — 556 / **557**
+    - 8.2.4. Startup delay — 556 / **557**
+    - 8.2.5. XOSC counter — 557 / **558**
+    - 8.2.6. DORMANT mode — 557 / **558**
+    - 8.2.7. Programmer’s model — 558 / **559**
+    - 8.2.8. List of registers — 559 / **560**
+  - 8.3. Ring oscillator (ROSC) — 561 / **562**
+    - 8.3.1. Overview — 561 / **562**
+    - 8.3.2. Changes from RP2040 — 562 / **563**
+    - 8.3.3. Changes between RP2350 revisions — 562 / **563**
+    - 8.3.4. ROSC/XOSC trade-offs — 562 / **563**
+    - 8.3.5. Modifying the frequency — 563 / **564**
+    - 8.3.6. Randomising the frequency — 563 / **564**
+    - 8.3.7. ROSC divider — 563 / **564**
+    - 8.3.8. Random number generator — 564 / **565**
+    - 8.3.9. ROSC counter — 564 / **565**
+    - 8.3.10. DORMANT mode — 564 / **565**
+    - 8.3.11. List of registers — 565 / **566**
+  - 8.4. Low Power oscillator (LPOSC) — 569 / **570**
+    - 8.4.1. Frequency accuracy and calibration — 569 / **570**
+    - 8.4.2. Using an external low-power clock — 570 / **571**
+    - 8.4.3. List of registers — 570 / **571**
+  - 8.5. Tick generators — 570 / **571**
+    - 8.5.1. Overview — 570 / **571**
+    - 8.5.2. List of registers — 571 / **572**
+  - 8.6. PLL — 575 / **576**
+    - 8.6.1. Overview — 575 / **576**
+    - 8.6.2. Changes from RP2040 — 575 / **576**
+    - 8.6.3. Calculating PLL parameters — 576 / **577**
+    - 8.6.4. Configuration — 580 / **581**
+    - 8.6.5. List of Registers — 583 / **584**
+- 9. GPIO — 587 / **588**
+  - 9.1. Overview — 587 / **588**
+  - 9.2. Changes from RP2040 — 588 / **589**
+  - 9.3. Reset state — 588 / **589**
+  - 9.4. Function select — 589 / **590**
+  - 9.5. Interrupts — 594 / **595**
+  - 9.6. Pads — 595 / **596**
+    - 9.6.1. Bus keeper mode — 596 / **597**
+  - 9.7. Pad isolation latches — 596 / **597**
+  - 9.8. Processor GPIO controls (SIO) — 597 / **598**
+  - 9.9. GPIO coprocessor port — 597 / **598**
+  - 9.10. Software examples — 598 / **599**
+    - 9.10.1. Select an IO function — 598 / **599**
+    - 9.10.2. Enable a GPIO interrupt — 603 / **604**
+  - 9.11. List of registers — 604 / **605**
+    - 9.11.1. IO - User Bank — 604 / **605**
+    - 9.11.2. IO - QSPI Bank — 760 / **761**
+    - 9.11.3. Pad Control - User Bank — 785 / **786**
+    - 9.11.4. Pad Control - QSPI Bank — 812 / **813**
+- 10. Security — 816 / **817**
+  - 10.1. Overview (Arm) — 816 / **817**
+    - 10.1.1. Secure boot — 816 / **817**
+    - 10.1.2. Encrypted boot — 817 / **818**
+    - 10.1.3. Isolating trusted and untrusted doftware — 818 / **819**
+  - 10.2. Processor security features (Arm) — 819 / **820**
+    - 10.2.1. Background — 819 / **820**
+    - 10.2.2. IDAU address map — 820 / **821**
+  - 10.3. Overview (RISC-V) — 821 / **822**
+  - 10.4. Processor security features (RISC-V) — 821 / **822**
+  - 10.5. Secure boot enable procedure — 822 / **823**
+  - 10.6. Access control — 822 / **823**
+    - 10.6.1. GPIO access control — 823 / **824**
+    - 10.6.2. Bus access control — 824 / **825**
+    - 10.6.3. List of registers — 826 / **827**
+  - 10.7. DMA — 867 / **868**
+    - 10.7.1. Channel security attributes — 868 / **869**
+    - 10.7.2. Memory protection unit — 868 / **869**
+    - 10.7.3. DREQ attributes — 868 / **869**
+    - 10.7.4. IRQ attributes — 868 / **869**
+  - 10.8. OTP — 869 / **870**
+  - 10.9. Glitch detector — 869 / **870**
+    - 10.9.1. Theory of operation — 870 / **871**
+    - 10.9.2. Trigger response — 870 / **871**
+    - 10.9.3. List of registers — 871 / **872**
+  - 10.10. Factory test JTAG — 874 / **875**
+  - 10.11. Decommissioning — 874 / **875**
+- 11. PIO — 876 / **877**
+  - 11.1. Overview — 876 / **877**
+    - 11.1.1. Changes from RP2040 — 877 / **878**
+  - 11.2. Programmer’s model — 878 / **879**
+    - 11.2.1. PIO programs — 879 / **880**
+    - 11.2.2. Control flow — 879 / **880**
+    - 11.2.3. Registers — 881 / **882**
+    - 11.2.4. Autopull — 881 / **882**
+    - 11.2.5. Stalling — 884 / **885**
+    - 11.2.6. Pin mapping — 884 / **885**
+    - 11.2.7. IRQ flags — 884 / **885**
+    - 11.2.8. Interactions between state machines — 885 / **886**
+  - 11.3. PIO assembler (pioasm) — 885 / **886**
+    - 11.3.1. Directives — 885 / **886**
+    - 11.3.2. Values — 887 / **888**
+    - 11.3.3. Expressions — 887 / **888**
+    - 11.3.4. Comments — 888 / **889**
+    - 11.3.5. Labels — 888 / **889**
+    - 11.3.6. Instructions — 888 / **889**
+    - 11.3.7. Pseudo-instructions — 889 / **890**
+  - 11.4. Instruction Set — 889 / **890**
+    - 11.4.1. Summary — 889 / **890**
+    - 11.4.2. JMP — 890 / **891**
+    - 11.4.3. WAIT — 891 / **892**
+    - 11.4.4. IN — 892 / **893**
+    - 11.4.5. OUT — 893 / **894**
+    - 11.4.6. PUSH — 894 / **895**
+    - 11.4.7. PULL — 895 / **896**
+    - 11.4.8. MOV (to RX) — 896 / **897**
+    - 11.4.9. MOV (from RX) — 897 / **898**
+    - 11.4.10. MOV — 898 / **899**
+    - 11.4.11. IRQ — 900 / **901**
+    - 11.4.12. SET — 901 / **902**
+  - 11.5. Functional details — 902 / **903**
+    - 11.5.1. Side-set — 902 / **903**
+    - 11.5.2. Program wrapping — 903 / **904**
+    - 11.5.3. FIFO joining — 905 / **906**
+    - 11.5.4. Autopush and Autopull — 906 / **907**
+    - 11.5.5. Clock Dividers — 911 / **912**
+    - 11.5.6. GPIO mapping — 911 / **912**
+    - 11.5.7. Forced and EXEC’d instructions — 913 / **914**
+  - 11.6. Examples — 915 / **916**
+    - 11.6.1. Duplex SPI — 915 / **916**
+    - 11.6.2. WS2812 LEDs — 919 / **920**
+    - 11.6.3. UART TX — 921 / **922**
+    - 11.6.4. UART RX — 923 / **924**
+    - 11.6.5. Manchester serial TX and RX — 926 / **927**
+    - 11.6.6. Differential Manchester (BMC) TX and RX — 929 / **930**
+    - 11.6.7. I2C — 932 / **933**
+    - 11.6.8. PWM — 936 / **937**
+    - 11.6.9. Addition — 938 / **939**
+    - 11.6.10. Further examples — 939 / **940**
+  - 11.7. List of registers — 939 / **940**
+- 12. Peripherals — 961 / **962**
+  - 12.1. UART — 961 / **962**
+    - 12.1.1. Overview — 961 / **962**
+    - 12.1.2. Functional description — 962 / **963**
+    - 12.1.3. Operation — 964 / **965**
+    - 12.1.4. UART hardware flow control — 966 / **967**
+    - 12.1.5. UART DMA interface — 967 / **968**
+    - 12.1.6. Interrupts — 969 / **970**
+    - 12.1.7. Programmer’s model — 970 / **971**
+    - 12.1.8. List of registers — 972 / **973**
+  - 12.2. I2C — 983 / **984**
+    - 12.2.1. Features — 984 / **985**
+    - 12.2.2. IP configuration — 984 / **985**
+    - 12.2.3. I2C overview — 985 / **986**
+    - 12.2.4. I2C terminology — 987 / **988**
+    - 12.2.5. I2C behaviour — 988 / **989**
+    - 12.2.6. I2C protocols — 989 / **990**
+    - 12.2.7. TX FIFO Management and START, STOP and RESTART Generation — 993 / **994**
+    - 12.2.8. Multiple master arbitration — 995 / **996**
+    - 12.2.9. Clock synchronisation — 995 / **996**
+    - 12.2.10. Operation modes — 996 / **997**
+    - 12.2.11. Spike suppression — 1001 / **1002**
+    - 12.2.12. Fast mode plus operation — 1002 / **1003**
+    - 12.2.13. Bus clear feature — 1002 / **1003**
+    - 12.2.14. IC_CLK frequency configuration — 1003 / **1004**
+    - 12.2.15. DMA controller interface — 1007 / **1008**
+    - 12.2.16. Operation of interrupt registers — 1008 / **1009**
+    - 12.2.17. List of registers — 1008 / **1009**
+  - 12.3. SPI — 1046 / **1047**
+    - 12.3.1. Changes from RP2040 — 1047 / **1048**
+    - 12.3.2. Overview — 1047 / **1048**
+    - 12.3.3. Functional description — 1047 / **1048**
+    - 12.3.4. Operation — 1050 / **1051**
+    - 12.3.5. List of registers — 1060 / **1061**
+  - 12.4. ADC and Temperature Sensor — 1066 / **1067**
+    - 12.4.1. Changes from RP2040 — 1068 / **1069**
+    - 12.4.2. ADC controller — 1069 / **1070**
+    - 12.4.3. SAR ADC — 1069 / **1070**
+    - 12.4.4. ADC ENOB — 1073 / **1074**
+    - 12.4.5. INL and DNL — 1073 / **1074**
+    - 12.4.6. Temperature sensor — 1073 / **1074**
+    - 12.4.7. List of registers — 1073 / **1074**
+  - 12.5. PWM — 1076 / **1077**
+    - 12.5.1. Overview — 1077 / **1078**
+    - 12.5.2. Programmer’s model — 1077 / **1078**
+    - 12.5.3. List of registers — 1086 / **1087**
+  - 12.6. DMA — 1094 / **1095**
+    - 12.6.1. Changes from RP2040 — 1095 / **1096**
+    - 12.6.2. Configuring channels — 1096 / **1097**
+    - 12.6.3. Triggering channels — 1098 / **1099**
+    - 12.6.4. Data request (DREQ) — 1100 / **1101**
+    - 12.6.5. Interrupts — 1102 / **1103**
+    - 12.6.6. Security — 1102 / **1103**
+    - 12.6.7. Bus error handling — 1105 / **1106**
+    - 12.6.8. Additional features — 1107 / **1108**
+    - 12.6.9. Example use cases — 1108 / **1109**
+    - 12.6.10. List of Registers — 1112 / **1113**
+  - 12.7. USB — 1141 / **1142**
+    - 12.7.1. Overview — 1141 / **1142**
+    - 12.7.2. Changes from RP2040 — 1142 / **1143**
+    - 12.7.3. Architecture — 1144 / **1145**
+    - 12.7.4. Programmer’s model — 1155 / **1156**
+    - 12.7.5. List of registers — 1159 / **1160**
+  - 12.8. System timers — 1182 / **1183**
+    - 12.8.1. Overview — 1182 / **1183**
+    - 12.8.2. Counter — 1183 / **1184**
+    - 12.8.3. Alarms — 1183 / **1184**
+    - 12.8.4. Programmer’s model — 1184 / **1185**
+    - 12.8.5. List of registers — 1188 / **1189**
+  - 12.9. Watchdog — 1193 / **1194**
+    - 12.9.1. Overview — 1193 / **1194**
+    - 12.9.2. Changes from RP2040 — 1193 / **1194**
+    - 12.9.3. Watchdog counter — 1193 / **1194**
+    - 12.9.4. Control watchdog reset levels — 1194 / **1195**
+    - 12.9.5. Scratch registers — 1194 / **1195**
+    - 12.9.6. Programmer’s model — 1194 / **1195**
+    - 12.9.7. List of registers — 1196 / **1197**
+  - 12.10. Always-on timer — 1197 / **1198**
+    - 12.10.1. Overview — 1197 / **1198**
+    - 12.10.2. Changes from RP2040 — 1198 / **1199**
+    - 12.10.3. Accessing the AON Timer — 1198 / **1199**
+    - 12.10.4. Using the alarm — 1198 / **1199**
+    - 12.10.5. Selecting the AON Timer tick source — 1199 / **1200**
+    - 12.10.6. Synchronising the AON timer to an external 1Hz clock — 1201 / **1202**
+    - 12.10.7. Using an external clock or tick from GPIO — 1201 / **1202**
+    - 12.10.8. Using a tick faster than 1ms — 1201 / **1202**
+    - 12.10.9. List of registers — 1202 / **1203**
+  - 12.11. HSTX — 1202 / **1203**
+    - 12.11.1. Data FIFO — 1203 / **1204**
+    - 12.11.2. Output shift register — 1203 / **1204**
+    - 12.11.3. Bit crossbar — 1204 / **1205**
+    - 12.11.4. Clock generator — 1205 / **1206**
+    - 12.11.5. Command expander — 1206 / **1207**
+    - 12.11.6. PIO-to-HSTX coupled mode — 1208 / **1209**
+    - 12.11.7. List of control registers — 1208 / **1209**
+    - 12.11.8. List of FIFO registers — 1212 / **1213**
+  - 12.12. TRNG — 1212 / **1213**
+    - 12.12.1. Overview — 1212 / **1213**
+    - 12.12.2. Configuration — 1213 / **1214**
+    - 12.12.3. Operation — 1213 / **1214**
+    - 12.12.4. Caveats — 1214 / **1215**
+    - 12.12.5. List of registers — 1215 / **1216**
+  - 12.13. SHA-256 accelerator — 1221 / **1222**
+    - 12.13.1. Message padding — 1222 / **1223**
+    - 12.13.2. Throughput — 1222 / **1223**
+    - 12.13.3. Data size and endianness — 1222 / **1223**
+    - 12.13.4. DMA DREQ interface — 1222 / **1223**
+    - 12.13.5. List of registers — 1223 / **1224**
+  - 12.14. QSPI memory interface (QMI) — 1226 / **1227**
+    - 12.14.1. Overview — 1226 / **1227**
+    - 12.14.2. QSPI transfers — 1228 / **1229**
+    - 12.14.3. Timing — 1231 / **1232**
+    - 12.14.4. Address translation — 1234 / **1235**
+    - 12.14.5. Direct mode — 1235 / **1236**
+    - 12.14.6. List of registers — 1236 / **1237**
+  - 12.15. System Control Registers — 1249 / **1250**
+    - 12.15.1. SYSINFO — 1249 / **1250**
+    - 12.15.2. SYSCFG — 1251 / **1252**
+    - 12.15.3. TBMAN — 1254 / **1255**
+    - 12.15.4. BUSCTRL — 1255 / **1256**
+- 13. OTP — 1268 / **1269**
+  - 13.1. OTP address map — 1268 / **1269**
+    - 13.1.1. Guarded reads — 1269 / **1270**
+  - 13.2. Background: OTP IP details — 1269 / **1270**
+  - 13.3. Background: OTP hardware architecture — 1270 / **1271**
+    - 13.3.1. Lock shim — 1270 / **1271**
+    - 13.3.2. External interfaces — 1271 / **1272**
+    - 13.3.3. OTP boot oscillator — 1272 / **1273**
+    - 13.3.4. Power-up state machine — 1272 / **1273**
+  - 13.4. Critical flags — 1273 / **1274**
+  - 13.5. Page locks — 1274 / **1275**
+    - 13.5.1. Lock progression — 1274 / **1275**
+    - 13.5.2. OTP access keys — 1275 / **1276**
+    - 13.5.3. Lock encoding in OTP — 1276 / **1277**
+    - 13.5.4. Special pages — 1276 / **1277**
+    - 13.5.5. Permissions of blank devices — 1276 / **1277**
+  - 13.6. Error Correction Code (ECC) — 1277 / **1278**
+    - 13.6.1. Bit repair by polarity (BRP) — 1277 / **1278**
+    - 13.6.2. Modified Hamming ECC — 1278 / **1279**
+  - 13.7. Device decommissioning (RMA) — 1279 / **1280**
+  - 13.8. Imaging Vulnerability — 1279 / **1280**
+    - 13.8.1. Best Practices — 1279 / **1280**
+    - 13.8.2. Chaff — 1280 / **1281**
+  - 13.9. List of registers — 1280 / **1281**
+  - 13.10. Predefined OTP data locations — 1292 / **1293**
+- 14. Electrical and mechanical — 1327 / **1328**
+  - 14.1. QFN-60 package — 1327 / **1328**
+    - 14.1.1. Thermal characteristics — 1328 / **1329**
+    - 14.1.2. Recommended PCB footprint — 1328 / **1329**
+  - 14.2. QFN-80 package — 1328 / **1329**
+    - 14.2.1. Thermal characteristics — 1329 / **1330**
+    - 14.2.2. Recommended PCB footprint — 1329 / **1330**
+  - 14.3. Flash in package — 1330 / **1331**
+  - 14.4. Package markings — 1331 / **1332**
+  - 14.5. Storage conditions — 1331 / **1332**
+  - 14.6. Solder profile — 1331 / **1332**
+  - 14.7. Compliance — 1333 / **1334**
+  - 14.8. Pinout — 1333 / **1334**
+    - 14.8.1. Pin locations — 1333 / **1334**
+    - 14.8.2. Pin definitions — 1335 / **1336**
+  - 14.9. Electrical specifications — 1338 / **1339**
+    - 14.9.1. Absolute maximum ratings — 1338 / **1339**
+    - 14.9.2. ESD performance — 1339 / **1340**
+    - 14.9.3. Thermal performance — 1339 / **1340**
+    - 14.9.4. IO electrical characteristics — 1339 / **1340**
+    - 14.9.5. Power supplies — 1343 / **1344**
+    - 14.9.6. Core voltage regulator — 1344 / **1345**
+    - 14.9.7. Power consumption — 1345 / **1346**
+  - Appendix A: Register field types — 1349 / **1350**
+  - Changes from RP2040 — 1349 / **1350**
+  - Standard types — 1349 / **1350**
+  - RW: — 1349 / **1350**
+  - RO: — 1349 / **1350**
+  - WO: — 1349 / **1350**
+  - Clear types — 1349 / **1350**
+  - SC: — 1349 / **1350**
+  - WC: — 1349 / **1350**
+  - FIFO types — 1350 / **1351**
+  - RWF: — 1350 / **1351**
+  - RF: — 1350 / **1351**
+  - WF: — 1350 / **1351**
+  - Appendix B: Units used in this document — 1351 / **1352**
+  - Memory and storage capacity — 1351 / **1352**
+  - Transfer Rate — 1351 / **1352**
+  - Physical Quantities — 1351 / **1352**
+  - Scale Prefixes — 1353 / **1354**
+  - Digit Separators — 1353 / **1354**
+  - Appendix C: Hardware revision history — 1354 / **1355**
+  - RP2350 A2 — 1354 / **1355**
+  - RP2350 A3 — 1354 / **1355**
+  - Hardware changes — 1354 / **1355**
+  - Bootrom changes — 1355 / **1356**
+  - RP2350 A4 — 1355 / **1356**
+  - Hardware Changes — 1355 / **1356**
+  - Bootrom Changes — 1356 / **1357**
+  - Appendix E: Errata — 1357 / **1358**
+  - ACCESSCTRL — 1357 / **1358**
+  - RP2350-E3 — 1357 / **1358**
+  - Bootrom — 1357 / **1358**
+  - RP2350-E10 — 1357 / **1358**
+  - RP2350-E13 — 1358 / **1359**
+  - RP2350-E14 — 1358 / **1359**
+  - RP2350-E15 — 1359 / **1360**
+  - RP2350-E18 — 1359 / **1360**
+  - RP2350-E19 — 1360 / **1361**
+  - RP2350-E20 — 1360 / **1361**
+  - RP2350-E21 — 1361 / **1362**
+  - RP2350-E22 — 1362 / **1363**
+  - RP2350-E23 — 1362 / **1363**
+  - RP2350-E24 — 1362 / **1363**
+  - RP2350-E25 — 1363 / **1364**
+  - Bus Fabric — 1363 / **1364**
+  - RP2350-E27 — 1363 / **1364**
+  - DMA — 1364 / **1365**
+  - RP2350-E5 — 1364 / **1365**
+  - RP2350-E8 — 1365 / **1366**
+  - GPIO — 1365 / **1366**
+  - RP2350-E9 — 1366 / **1367**
+  - Hazard3 — 1368 / **1369**
+  - RP2350-E4 — 1368 / **1369**
+  - RP2350-E6 — 1369 / **1370**
+  - RP2350-E7 — 1369 / **1370**
+  - OTP — 1370 / **1371**
+  - RP2350-E16 — 1370 / **1371**
+  - RP2350-E17 — 1371 / **1372**
+  - RP2350-E28 — 1371 / **1372**
+  - RCP — 1372 / **1373**
+  - RP2350-E26 — 1372 / **1373**
+  - SIO — 1373 / **1374**
+  - RP2350-E1 — 1373 / **1374**
+  - RP2350-E2 — 1373 / **1374**
+  - XIP — 1374 / **1375**
+  - RP2350-E11 — 1374 / **1375**
+  - USB — 1375 / **1376**
+  - RP2350-E12 — 1375 / **1376**
+  - Appendix H: Documentation release history — 1377 / **1378**
+  - 29 July 2025 — 1377 / **1378**
+  - 20 February 2025 — 1377 / **1378**
+  - 04 December 2024 — 1377 / **1378**
+  - 16 October 2024 — 1377 / **1378**
+  - 15 October 2024 — 1377 / **1378**
+  - 6 September 2024 — 1377 / **1378**
+  - 8 August 2024 — 1378 / **1379**
