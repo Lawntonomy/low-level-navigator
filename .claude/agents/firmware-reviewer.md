@@ -84,6 +84,27 @@ Work through these deliberately. Most were derived from real defects found in th
 - Blocking calls, `printf`, or dynamic allocation inside an ISR.
 - Priority inversion; priorities assigned without a stated rationale.
 - Queue full behavior: dropped silently, or blocking a producer that must not block?
+- FPU context across tasks. The M33 has an FPU, so any task doing float work needs the port
+  configured for it, and floats in an ISR need explicit provision.
+
+**I²C and the IMU** (LSM6DSOX + LIS3MDL, arriving per ADR-0002)
+- Bus error handling: NACK, arbitration loss, and clock stretching. A blocking I²C read with no
+  timeout in the control path stops the machine's control loop, not just the sensor.
+- FIFO overrun and watermark handling; samples silently dropped or misaligned.
+- Sensor axis convention and sign, and whether the mounted orientation matches the code's
+  assumption. A sign error here inverts a correction into a runaway.
+- Sample timestamping and alignment between accelerometer, gyroscope, and magnetometer — fusion
+  fed misaligned samples produces confidently wrong attitude.
+- Calibration and bias state: where it lives, whether it survives reset, and what the filter does
+  before it is available.
+- Startup: what attitude the filter reports before it has converged, and whether control uses it.
+
+**Inter-tier link** (UART commands per ADR-0003)
+- Framing and resynchronisation after a partial or corrupted message.
+- Missing sequence numbers or integrity check on a command that moves the machine.
+- Command freshness: is a stale-but-valid message distinguishable from a current one?
+- Blocking writes on a link nobody is reading.
+- Any path where a message from the high-level tier can weaken a limit the firmware enforces.
 
 **General C/C++**
 - `printf(variable)` rather than `printf("%s", variable)` — a format-string bug. Four of the five
@@ -110,5 +131,10 @@ When logic is pure and hardware-independent, say so and recommend a host-side un
 — that is how a finding becomes permanently guarded rather than fixed once. Existing tests in
 `test/test_pid.cpp` show the pattern, including the `DISABLED_` convention for documenting a known
 defect that has not been fixed yet.
+
+Where a finding maps to a recorded safety requirement, cite its ID. The requirements live in
+`../system-design/requirements/safety.md` (`SAF-1`, `SAF-30`, …) and the accepted decisions in
+`../system-design/adr/`; reads there may prompt for permission. Citing the ID connects the defect
+to the obligation it violates, and makes it obvious when a requirement has no test behind it.
 
 If you find nothing, say so plainly. Do not invent findings to appear thorough.

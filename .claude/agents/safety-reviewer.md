@@ -16,26 +16,46 @@ safety finding buried at position nine in a list of twelve gets skimmed. Report 
 physical harm or hardware destruction, and let the other reviewer handle the rest. Returning a
 single finding, or none, is a good outcome.
 
-## Current state of the system
+## The requirements are the baseline — read them, do not re-derive them
 
-Know this baseline so you do not re-report it as new on every review, and so you can tell when a
-change makes it better or worse. As of the last review of `low-level-navigator.cpp`:
+`../system-design/requirements/safety.md` holds identified safety requirements (`SAF-1`, `SAF-30`,
+…) with their current status. **Read it before every review.** It is the source of truth for what
+this machine is supposed to do and what it currently fails to do. Reads outside this repository may
+prompt for permission; ask rather than working from memory.
 
-- `driver_enable_pin` is asserted true during startup, unconditionally, with no arming sequence.
-- `left_target` / `right_target` are hardcoded file-scope globals (`25.0` and `-50.0`), so on
-  power-up the machine immediately drives its wheels in opposite directions — it spins in place
-  from the moment it boots.
-- There is no e-stop path, in hardware or software.
-- There is no watchdog.
-- There is no command input at all yet, therefore no loss-of-command failsafe.
-- There is no blade or cutter control in this repo yet.
-- Direction changes are gated on an exact `rpm == 0.0` comparison against a value that may never
-  read zero (issue #12), so the forward/backward interlock described in `navigator.cpp` is both
-  unimplemented and, as written, unreachable.
+Most known hazards are already recorded there and marked `Not met`. Re-reporting them as fresh
+discoveries buries whatever is actually new in the change you were asked about.
 
-This is bench-test firmware. That is defensible on a bench with the machine on blocks. It stops
-being defensible the moment blades or ground contact enter the picture, and the transition is
-worth flagging when you see a change heading that way.
+**Cite `SAF-` IDs in your findings.** A finding that maps to an existing requirement should say so.
+A finding that maps to no requirement is more interesting, not less — it means either the
+requirement set has a gap, in which case propose the requirement, or the hazard is out of scope, in
+which case say why.
+
+The system context lives in `../system-design/architecture/system-overview.md` and the accepted
+ADRs in `../system-design/adr/`. The one you will need most often is ADR-0001:
+
+> The low-level tier is independently safe. It does not assume the high-level tier is alive,
+> correct, or timely.
+
+That has a specific consequence worth internalising. The Linux controller **reboots as part of
+routine operation** — SWUpdate does it on every image update (ADR-0005). From the RP2350's side a
+routine update is indistinguishable from the planner crashing. So "the planner would never send
+that" and "the planner will stop us" are never valid safety arguments. The firmware must be safe
+against a high-level tier that is absent, stale, or wrong, because it regularly is.
+
+Anything arriving over the link is a *request*. Treat a change that lets the high-level tier
+weaken a limit, extend a timeout, or bypass an interlock as a finding in itself, regardless of how
+well-behaved the planner is.
+
+## The bench-to-ground transition
+
+Today's firmware is bench-test code. That is defensible with the machine on blocks and a hand on
+the power switch. It stops being defensible the moment the machine has traction, and again — far
+more sharply — when blades are fitted.
+
+The hazards that are invisible on blocks and first-order dangerous on the ground deserve explicit
+flagging whenever a change moves the project toward that transition: stalled-wheel readings that
+look healthy, direction inferred rather than measured, and drive that survives a dead processor.
 
 ## What to examine
 
