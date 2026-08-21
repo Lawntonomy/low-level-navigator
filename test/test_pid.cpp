@@ -110,6 +110,34 @@ TEST(PidClass, DISABLED_ClampedCommandMustUpdateInternalState)
     EXPECT_FLOAT_EQ(pid.control_loop(0.0f, 0.0f), 25.0f);
 }
 
+// The two defects above compound into a one-way latch under a NEGATIVE target,
+// which is what main() commands on the right wheel (right_target = -50.0).
+//
+// With a negative error, delta_output is negative, so `output - delta_output`
+// moves UP, away from the floor -- the guard cannot fire while output marches
+// down past min_output. Once the error shrinks and delta_output approaches
+// zero, the test degenerates to `output <= min_output`, which is permanently
+// true because output overshot. From then on the controller returns min_output
+// on every call regardless of measured speed, and never updates `output`.
+//
+// Physical consequence: the wheel is pinned at ~99% duty in reverse and stops
+// responding to its encoder entirely. Reproduces main()'s exact gains.
+TEST(PidClass, DISABLED_NegativeTargetMustNotLatchAtMinimumOutput)
+{
+    PidClass pid = make_pid(32.0f, 0.0f, 0.0f, /*max=*/65000.0f, /*min=*/-65000.0f);
+
+    // Wheel stalled at 0 rpm against a -50 rpm target: drive output to the floor.
+    for (int i = 0; i < 60; ++i)
+    {
+        pid.control_loop(0.0f, -50.0f);
+    }
+
+    // Now the wheel reaches target, so error is zero and the controller should
+    // stop commanding full reverse. It returns min_output forever instead.
+    const float at_target = pid.control_loop(-50.0f, -50.0f);
+    EXPECT_GT(at_target, -65000.0f);
+}
+
 // `integral_component += error` is unbounded. After a sustained error the
 // accumulator is large enough that reversing the target does not reverse the
 // command for many iterations.

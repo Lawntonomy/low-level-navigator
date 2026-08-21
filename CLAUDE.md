@@ -88,9 +88,20 @@ functions/parameters, `snake_case` variables, `UPPER_CASE` globals.
 ## Architecture
 
 - **`src/hardware_drivers/`** — thin, direct-register/PIO drivers with no business logic:
-  `encoder.cpp/.pio` (quadrature decode via PIO, `get_left_rpm`/`get_right_rpm`), `pwm.cpp/.pio`
-  (PIO-based PWM for motor drive), `ws2812.pio` (status NeoPixel), `gpio_defines.h` (single source
-  of truth for pin assignments and constants like `pwm_frequency`/`encoder_ticks`).
+  `encoder.cpp/.pio`, `pwm.cpp/.pio` (PIO-based PWM for motor drive), `ws2812.pio` (status
+  NeoPixel), `gpio_defines.h` (single source of truth for pin assignments and constants like
+  `pwm_frequency`/`encoder_ticks`).
+
+  **The encoders are not quadrature.** `encoder.pio` is a single-pin period counter — one GPIO per
+  side, counting PIO cycles between high→low transitions and pushing the count to a DMA ring
+  buffer. `get_left_rpm`/`get_right_rpm` return an unsigned magnitude only; **direction is not
+  measurable**. The sign is manufactured in `main()` by negating according to the *commanded*
+  direction, so a wheel rolling backwards while commanded forward reads as forward motion. Fixing
+  that needs a second channel per encoder, not a firmware change.
+
+  `pwm.pio` counts Y down from the period and raises the pin only when `X == Y`, so a level
+  **above** the period never matches and produces 0% duty rather than 100%. Always clamp to the
+  period before writing.
 - **`src/high_level_drivers/`** — hardware-agnostic control logic: `pid.cpp/.hpp` (a per-wheel
   `PidClass` with configurable output clamping) and `navigator.cpp/.hpp`, which is currently a stub
   — the state-machine design described below and in [README.md](README.md) is not implemented yet.
