@@ -1,1 +1,9 @@
 build
+build-test
+
+# The RP2350 datasheet is ~8MB and CC BY-ND licensed; keeping it out of git
+# history avoids permanent repo bloat. Download it into docs/ from
+# https://datasheets.raspberrypi.com/rp2350/rp2350-datasheet.pdf
+# docs/rp2350-datasheet-index.md is committed and records the revision it was
+# generated from; regenerate with scripts/gen-datasheet-index.py.
+docs/*.pdf
