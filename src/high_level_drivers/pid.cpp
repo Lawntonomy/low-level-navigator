@@ -5,7 +5,8 @@
 static const char* category = "PID";
 
 PidClass::PidClass(float kp_init, float ki_init, float kd_init)
-    : kp(kp_init), ki(ki_init), kd(kd_init), integral_component(0.0), output(0.0)
+    : max_output(0), min_output(0), prior_error(0.0f), integral_component(0.0f), output(0.0f),
+      kp(kp_init), ki(ki_init), kd(kd_init)
 {
     Log::info(category, "init Pid");
 }
