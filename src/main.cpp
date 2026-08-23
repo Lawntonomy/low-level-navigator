@@ -78,7 +78,7 @@ void motors_init()
     for (uint p : pins)
     {
         gpio_init(p);
-        gpio_put(p, 0);           // drive low before enabling the output driver
+        gpio_put(p, 0); // drive low before enabling the output driver
         gpio_set_dir(p, GPIO_OUT);
     }
     motors_safe_state();
@@ -86,7 +86,7 @@ void motors_init()
 
 // Every path that gives up must remove drive first. SAF-13: drive enable comes
 // off before a fault is reported, not after.
-[[noreturn]] void halt(const char *why)
+[[noreturn]] void halt(const char* why)
 {
     motors_safe_state();
 
@@ -109,7 +109,7 @@ void motors_init()
 
 // Owns the motors. Pinned to core 1 so link and logging work on core 0 cannot
 // lengthen its period (rt.h).
-[[noreturn]] void control_task(void *)
+[[noreturn]] void control_task(void*)
 {
     TickType_t last_wake = xTaskGetTickCount();
 
@@ -141,7 +141,7 @@ void motors_init()
     }
 }
 
-[[noreturn]] void link_rx_task(void *)
+[[noreturn]] void link_rx_task(void*)
 {
     for (;;)
     {
@@ -156,7 +156,7 @@ void motors_init()
 }
 
 // Sole writer to the command UART — see link.hpp's ownership rule.
-[[noreturn]] void link_tx_task(void *)
+[[noreturn]] void link_tx_task(void*)
 {
     for (;;)
     {
@@ -166,7 +166,7 @@ void motors_init()
 }
 
 // Builds the periodic messages at the rates in IF-0001 §6.
-[[noreturn]] void telemetry_task(void *)
+[[noreturn]] void telemetry_task(void*)
 {
     TickType_t last_wake = xTaskGetTickCount();
     uint64_t next_hb = 0, next_status = 0, next_wheel = 0, next_stats = 0;
@@ -191,8 +191,7 @@ void motors_init()
             // told the data is untrustworthy rather than handed a plausible
             // zero (SAF-20).
             const safety::Status st = safety::status();
-            link::send_wheel_state(0, 0, st.left_applied, st.right_applied,
-                                   false, false);
+            link::send_wheel_state(0, 0, st.left_applied, st.right_applied, false, false);
             next_wheel = now + 20000; // 50 Hz
         }
         if (now >= next_stats)
@@ -205,7 +204,7 @@ void motors_init()
     }
 }
 
-[[noreturn]] void logger_task(void *)
+[[noreturn]] void logger_task(void*)
 {
     for (;;)
     {
@@ -222,9 +221,8 @@ void motors_init()
 
 // Creates a task or halts. Firmware that silently comes up without its control
 // loop is worse than firmware that does not come up.
-void must_create(TaskFunction_t fn, const char *name,
-                 configSTACK_DEPTH_TYPE stack, UBaseType_t prio,
-                 UBaseType_t affinity)
+void must_create(TaskFunction_t fn, const char* name, configSTACK_DEPTH_TYPE stack,
+                 UBaseType_t prio, UBaseType_t affinity)
 {
     TaskHandle_t h = nullptr;
     if (xTaskCreate(fn, name, stack, nullptr, prio, &h) != pdPASS || h == nullptr)
@@ -243,7 +241,7 @@ void must_create(TaskFunction_t fn, const char *name,
 // FreeRTOS hooks. Both are enabled in FreeRTOSConfig.h so a memory fault stops
 // the machine loudly instead of corrupting it quietly.
 
-extern "C" void vApplicationStackOverflowHook(TaskHandle_t, char *name)
+extern "C" void vApplicationStackOverflowHook(TaskHandle_t, char* name)
 {
     motors_safe_state();
     log_console::write_blocking("[FATAL] stack overflow in task: ");
@@ -290,16 +288,11 @@ int main()
         log_console::write_blocking("[boot] WARNING: last reset was watchdog\r\n");
     }
 
-    must_create(control_task, "control", rt::stack_control, rt::prio_control,
-                rt::core_control);
-    must_create(link_rx_task, "link_rx", rt::stack_link_rx, rt::prio_link_rx,
-                rt::core_service);
-    must_create(link_tx_task, "link_tx", rt::stack_link_tx, rt::prio_link_tx,
-                rt::core_service);
-    must_create(telemetry_task, "telem", rt::stack_telemetry,
-                rt::prio_telemetry, rt::core_service);
-    must_create(logger_task, "logger", rt::stack_logger, rt::prio_logger,
-                rt::core_service);
+    must_create(control_task, "control", rt::stack_control, rt::prio_control, rt::core_control);
+    must_create(link_rx_task, "link_rx", rt::stack_link_rx, rt::prio_link_rx, rt::core_service);
+    must_create(link_tx_task, "link_tx", rt::stack_link_tx, rt::prio_link_tx, rt::core_service);
+    must_create(telemetry_task, "telem", rt::stack_telemetry, rt::prio_telemetry, rt::core_service);
+    must_create(logger_task, "logger", rt::stack_logger, rt::prio_logger, rt::core_service);
 
     // Armed last, so a slow boot cannot trip it before the control task exists
     // to feed it. Nothing blocking may be added after this point without

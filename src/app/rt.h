@@ -80,9 +80,9 @@ constexpr UBaseType_t prio_logger = 3;
 
 constexpr configSTACK_DEPTH_TYPE stack_control = 1024;   // float PID + FPU frame
 constexpr configSTACK_DEPTH_TYPE stack_link_rx = 1024;   // mavlink_message_t ~300 B
-constexpr configSTACK_DEPTH_TYPE stack_link_tx = 512;   // holds one byte + a frame
+constexpr configSTACK_DEPTH_TYPE stack_link_tx = 512;    // holds one byte + a frame
 constexpr configSTACK_DEPTH_TYPE stack_telemetry = 1024; // packs messages on stack
-constexpr configSTACK_DEPTH_TYPE stack_logger = 512;    // drain() holds one byte
+constexpr configSTACK_DEPTH_TYPE stack_logger = 512;     // drain() holds one byte
 
 // ---------------------------------------------------------------------------
 // Periods

@@ -24,12 +24,12 @@
 // expands inside kernel internals that are compiled before task.h's macros are
 // visible, so the FreeRTOS-level wrapper is not available here.
 #undef configASSERT
-#define configASSERT(x)                                                        \
-    if ((x) == 0)                                                              \
-    {                                                                          \
-        __asm volatile("cpsid i" ::: "memory");                                \
-        for (;;)                                                               \
-            ;                                                                  \
+#define configASSERT(x)                                                                            \
+    if ((x) == 0)                                                                                  \
+    {                                                                                              \
+        __asm volatile("cpsid i" ::: "memory");                                                    \
+        for (;;)                                                                                   \
+            ;                                                                                      \
     }
 
 // ---------------------------------------------------------------------------
