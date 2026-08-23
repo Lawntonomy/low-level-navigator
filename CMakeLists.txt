@@ -13,7 +13,7 @@ set(CMAKE_BUILD_TYPE Debug)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 #enable_testing()
 
-add_executable(${PROJECT_NAME} ${CMAKE_CURRENT_SOURCE_DIR}/src/low-level-navigator.cpp)
+add_executable(${PROJECT_NAME} ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp)
 
 #add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/include/googletest)
 target_include_directories(
@@ -24,6 +24,7 @@ ${CMAKE_CURRENT_SOURCE_DIR}/include/
 ${CMAKE_CURRENT_SOURCE_DIR}/src/utility/
 ${CMAKE_CURRENT_SOURCE_DIR}/src/high_level_drivers/
 ${CMAKE_CURRENT_SOURCE_DIR}/src/hardware_drivers/
+${CMAKE_CURRENT_SOURCE_DIR}/mavlink/c/
 )
 
 target_link_directories(
@@ -39,7 +40,10 @@ target_link_directories(
 target_sources(
     ${PROJECT_NAME}
     PUBLIC  
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/low-level-navigator.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/app/link.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/app/log.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/app/safety.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/hardware_drivers/encoder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/hardware_drivers/pwm.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/utility/logger.cpp
@@ -52,12 +56,13 @@ target_sources(
 # initialize the Raspberry Pi Pico SDK
 pico_sdk_init()
 
-pico_enable_stdio_usb(low-level-nav 1)
-pico_enable_stdio_uart(low-level-nav 1)
-target_compile_definitions(${PROJECT_NAME} PRIVATE
-PICO_DEFAULT_UART_TX_PIN=16
-PICO_DEFAULT_UART_RX_PIN=17
-)
+# TP-0001 D5: both stdio backends block, and stdio.c fans every write out to
+# every enabled driver. The console in src/app/log.cpp writes uart1 directly.
+# The old PICO_DEFAULT_UART_* override put stdio on GPIO 16/17, which is the
+# SAME uart0 the command link now uses (RP2350 datasheet Table 3) - keeping it
+# would have interleaved printf with protocol frames on the safety link.
+pico_enable_stdio_usb(low-level-nav 0)
+pico_enable_stdio_uart(low-level-nav 0)
 
 pico_generate_pio_header(low-level-nav ${CMAKE_CURRENT_SOURCE_DIR}/src/hardware_drivers/encoder.pio)
 pico_generate_pio_header(low-level-nav ${CMAKE_CURRENT_SOURCE_DIR}/src/hardware_drivers/pwm.pio)
@@ -83,6 +88,9 @@ target_compile_definitions(freertos_config
 target_link_libraries(${PROJECT_NAME}
   #pico_async_context_freertos
   pico_multicore
+  pico_rand
+  hardware_watchdog
+  hardware_uart
   FreeRTOS-Kernel-Heap4
   pico_stdlib
   hardware_pio
