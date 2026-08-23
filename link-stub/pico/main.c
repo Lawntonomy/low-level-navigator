@@ -39,8 +39,8 @@
 /* ---------------------------------------------------------------- config -- */
 
 #define CMD_UART uart0
-#define CMD_TX_PIN 0
-#define CMD_RX_PIN 1
+#define CMD_TX_PIN 16 // matches already-wired, previously-confirmed hardware
+#define CMD_RX_PIN 17 // (valid alt UART0 pins - same peripheral as GPIO 0/1)
 #define CMD_BAUD 1000000
 
 #define CON_UART uart1
@@ -437,8 +437,12 @@ static void apply_limits(void)
 
 int main(void)
 {
-    /* stdio is off entirely — see D5. Neither backend is initialised, so
-     * nothing in this program can accidentally block on printf. */
+    /* USB stdio is enabled (see CMakeLists.txt) SOLELY for picotool's vendor
+     * reset interface - this file never calls printf/puts, so the blocking
+     * write path D5 warns about has nothing to invoke it. stdio_init_all()
+     * only brings up USB here: UART stdio is off at the CMake level, so the
+     * LIB_PICO_STDIO_UART branch inside it compiles out. */
+    stdio_init_all();
 
     gpio_init(SCOPE_PIN);
     gpio_set_dir(SCOPE_PIN, GPIO_OUT);
