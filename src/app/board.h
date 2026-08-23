@@ -14,17 +14,24 @@ namespace board
 
 // Command link — the authoritative control path (ADR-0003).
 //
-// GPIO 0/1 and GPIO 16/17 are BOTH uart0 on RP2350 (datasheet Table 3), so the
-// old stdio UART on 16/17 cannot coexist with this. stdio is disabled outright
-// in CMakeLists.txt; see TP-0001 D5.
+// GPIO 16/17, not 0/1. TP-0001 D1 originally put this on 0/1 to dodge the OLD
+// firmware's stdio UART, which lived on 16/17 — but the physical wire was
+// never moved when that decision was made, and hardware bring-up on the link
+// stub confirmed it: zero bytes at GPIO 0/1, full clean traffic the moment the
+// firmware's pin assignment was corrected to match the existing wire. GPIO
+// 16/17 is a valid alternate mapping for the same uart0 peripheral as 0/1
+// (datasheet Table 3), and the conflict this was dodging is moot now that
+// stdio is disabled outright (TP-0001 D5) — so there is no remaining reason
+// to prefer 0/1, and every reason to match the wire that is actually there.
+//
 // Functions, not constexpr: the SDK's uart0/uart1 expand to a reinterpret_cast
 // of a fixed address, which C++ will not accept in a constant expression.
 inline uart_inst_t* cmd_uart()
 {
     return uart0;
 }
-constexpr uint cmd_tx_pin = 0;
-constexpr uint cmd_rx_pin = 1;
+constexpr uint cmd_tx_pin = 16;
+constexpr uint cmd_rx_pin = 17;
 constexpr uint cmd_baud = 1000000; // TP-0001 D2: exact on both ends at 48 MHz
 
 // Console — unframed, readable from the first instruction, independent of the
