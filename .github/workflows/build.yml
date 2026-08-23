@@ -28,7 +28,10 @@ jobs:
           if [ $? -ne 0 ]; then
             EXIT_CODE=1
           fi
-        done < <(find . -regex '.*\.\(cpp\|hpp\|cu\|c\|h\)')
+        # mavlink/ is generated output committed verbatim from upstream mavgen
+        # (see generate-mavlink.sh) — it is not authored code and must not be
+        # reformatted to our style, or every regeneration fights this job.
+        done < <(find . -regex '.*\.\(cpp\|hpp\|cu\|c\|h\)' -not -path './mavlink/*')
         exit $EXIT_CODE
 
   build:
