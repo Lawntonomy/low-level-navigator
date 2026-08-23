@@ -2,9 +2,8 @@
 
 #include "FreeRTOS.h"
 #include "pico/rand.h"
+#include "pico/time.h"
 #include "task.h"
-
-#include "app/log.hpp"
 
 namespace safety
 {
@@ -13,15 +12,15 @@ namespace
 
 // IF-0001 §7.1 / §7.5. PROVISIONAL: SAF-2 requires the command timeout to be
 // derived from measured stopping distance at maximum commanded speed and
-// recorded with its derivation. That measurement has not been taken, and it
-// depends on nothing in this firmware — it can be done today. Until then these
-// are placeholders chosen to be self-consistent, not correct.
+// recorded with its derivation. TP-0002 specifies how to measure it; it has not
+// been measured. These are placeholders chosen to be self-consistent, not
+// correct.
 constexpr uint64_t t_cmd_us = 150000;     // 3 x heartbeat
 constexpr uint64_t t_disarm_us = 1500000; // 10 x t_cmd
 
 // Magnitude clamp standing in for the real limit set. SAF-31 (slew) and SAF-30
-// (reversal through zero) are NOT implemented here and must be before this
-// firmware drives anything with traction.
+// (reversal through zero) are NOT implemented and must be before this firmware
+// drives anything with traction. The value itself is arbitrary pending CAL-2.
 constexpr int16_t max_drpm = 2000; // 200.0 rpm
 
 constexpr uint16_t arm_magic = 0xA57E;
@@ -42,6 +41,7 @@ struct State
     bool req_pending;
     int16_t req_left;
     int16_t req_right;
+    uint64_t req_arrival_us; // when it ARRIVED, not when it is consumed
 
     // Last ACCEPTED request, held between arrivals so a 200 Hz control loop
     // does not zero the target between 20 Hz commands.
@@ -66,18 +66,30 @@ struct State
 
 State s{};
 
+// Monotonic difference that cannot underflow.
+//
+// Every timestamp here is now sampled inside the same critical section that
+// reads it, so `now` should never precede a stored stamp. This is belt and
+// braces: an underflow in a timeout comparison does not degrade gracefully, it
+// reads as ~584,000 years elapsed and trips everything simultaneously.
+inline uint64_t elapsed(uint64_t now, uint64_t then)
+{
+    return (now >= then) ? (now - then) : 0;
+}
+
 } // namespace
 
-void init(uint64_t now_us)
+void init()
 {
     taskENTER_CRITICAL();
+    const uint64_t now = time_us_64();
     s = State{};
     s.session = get_rand_32();
     s.nav = NavState::precal_idle;
     s.fault = Fault::none;
-    s.last_hb_us = now_us;
-    s.win_start_us = now_us;
-    s.hb_gap_ref_us = now_us;
+    s.last_hb_us = now;
+    s.win_start_us = now;
+    s.hb_gap_ref_us = now;
     taskEXIT_CRITICAL();
 }
 
@@ -89,12 +101,12 @@ uint32_t session_id()
     return v;
 }
 
-bool on_heartbeat(uint64_t now_us, uint32_t peer_session)
+bool on_heartbeat(uint32_t peer_session)
 {
     bool restarted = false;
 
     taskENTER_CRITICAL();
-    s.last_hb_us = now_us;
+    s.last_hb_us = time_us_64();
 
     if (!s.peer_known)
     {
@@ -117,10 +129,8 @@ bool on_heartbeat(uint64_t now_us, uint32_t peer_session)
     return restarted;
 }
 
-void on_arm_request(bool arm, uint16_t magic, uint64_t now_us)
+void on_arm_request(bool arm, uint16_t magic)
 {
-    (void)now_us;
-
     taskENTER_CRITICAL();
     if (!arm || magic != arm_magic)
     {
@@ -133,21 +143,25 @@ void on_arm_request(bool arm, uint16_t magic, uint64_t now_us)
     }
     else if (s.fault != Fault::none)
     {
-        // SAF-13 territory: a latched fault is not clearable by asking again.
+        // A latched fault is not clearable by asking again.
         s.armed = false;
     }
     else
     {
         s.armed = true;
         s.nav = NavState::idle;
+
+        // SAF-11: arming is a decision, and the first motion after it must come
+        // from a command issued afterwards. Without this, a LAWN_DRIVE_CMD that
+        // arrived while disarmed — in the same RX batch, microseconds earlier —
+        // would be applied at the instant of arming.
+        s.req_pending = false;
     }
     taskEXIT_CRITICAL();
 }
 
-void on_stop_request(uint64_t now_us)
+void on_stop_request()
 {
-    (void)now_us;
-
     taskENTER_CRITICAL();
     s.armed = false;
     s.acc_left = s.acc_right = 0;
@@ -156,18 +170,20 @@ void on_stop_request(uint64_t now_us)
     taskEXIT_CRITICAL();
 }
 
-void on_drive_request(int16_t left_drpm, int16_t right_drpm, uint64_t now_us)
+bool on_drive_request(int16_t left_drpm, int16_t right_drpm)
 {
-    (void)now_us;
-
     taskENTER_CRITICAL();
     // Overwrite, never queue. If a previous request is still pending it was
     // superseded before the control loop ever saw it, which is the correct
-    // outcome for a burst draining after a stall.
+    // outcome for a burst draining after a stall — and worth counting, because
+    // otherwise that burst reports as 100% link quality.
+    const bool superseded = s.req_pending;
     s.req_pending = true;
     s.req_left = left_drpm;
     s.req_right = right_drpm;
+    s.req_arrival_us = time_us_64();
     taskEXIT_CRITICAL();
+    return superseded;
 }
 
 void on_frame_accepted()
@@ -186,40 +202,50 @@ void on_frame_rejected(uint32_t count)
     taskEXIT_CRITICAL();
 }
 
-Decision evaluate(uint64_t now_us)
+Decision evaluate()
 {
     Decision d{};
 
     taskENTER_CRITICAL();
+    const uint64_t now = time_us_64();
 
-    // Accept a pending request only if armed. SAF-11: no volume of command
-    // traffic arms the machine, and an unarmed request is discarded as an
-    // intention even though it was accepted as a frame.
+    // Accept a pending request only if armed, and only if it is still fresh
+    // *as of when it arrived* (IF-0001 §7.2 rule 4). Judging freshness at the
+    // moment of consumption would hide the receive path's own latency from the
+    // very timeout that is supposed to bound it.
     if (s.req_pending)
     {
-        if (s.armed && s.fault == Fault::none)
+        const bool fresh = elapsed(now, s.req_arrival_us) <= t_cmd_us;
+        if (s.armed && s.fault == Fault::none && fresh)
         {
             s.acc_left = s.req_left;
             s.acc_right = s.req_right;
-            s.last_accept_us = now_us;
+            s.last_accept_us = s.req_arrival_us;
             s.ever_accepted = true;
             if (s.nav == NavState::idle)
             {
                 s.nav = NavState::active;
             }
         }
+        else if (!fresh)
+        {
+            s.win_bad++;
+            s.frames_bad++;
+        }
+        // An unarmed request is accepted as a frame and discarded as an
+        // intention. SAF-11: no volume of command traffic arms the machine.
         s.req_pending = false;
     }
 
-    const uint64_t since_hb = now_us - s.last_hb_us;
-    const uint64_t since_cmd = s.ever_accepted ? (now_us - s.last_accept_us) : 0;
+    const uint64_t since_hb = elapsed(now, s.last_hb_us);
+    const uint64_t since_cmd = s.ever_accepted ? elapsed(now, s.last_accept_us) : 0;
 
     // Count a missed heartbeat at most once per nominal interval, so a long
     // outage does not inflate the window count without bound.
-    if (since_hb > (t_cmd_us / 3) * 2 && (now_us - s.hb_gap_ref_us) > t_cmd_us / 3)
+    if (since_hb > (t_cmd_us / 3) * 2 && elapsed(now, s.hb_gap_ref_us) > t_cmd_us / 3)
     {
         s.win_hb_missed++;
-        s.hb_gap_ref_us = now_us;
+        s.hb_gap_ref_us = now;
     }
 
     const bool hb_lost = since_hb > t_cmd_us;
@@ -228,10 +254,11 @@ Decision evaluate(uint64_t now_us)
 
     if (lost)
     {
-        // SAF-1: ramp to zero. IF-0001 §7.5: a stall does NOT disarm. A short
-        // interruption on a non-PREEMPT_RT Linux host is expected, and forcing
-        // a re-arm handshake for every scheduling hiccup would make the arming
-        // action a reflex rather than a decision.
+        // SAF-1, partially. The target is stepped to zero; there is no ramp,
+        // because SAF-31 does not exist. IF-0001 §7.5: a stall does NOT disarm.
+        // A short interruption on a non-PREEMPT_RT Linux host is expected, and
+        // forcing a re-arm handshake for every scheduling hiccup would make the
+        // arming action a reflex rather than a decision.
         s.acc_left = s.acc_right = 0;
         if (s.nav == NavState::active)
         {
@@ -256,8 +283,8 @@ Decision evaluate(uint64_t now_us)
 
     taskEXIT_CRITICAL();
 
-    // Clamp outside the lock. SAF-14 is enforced again at the PWM boundary;
-    // this is the policy limit, not the hardware one.
+    // Clamp outside the lock. SAF-14 must be enforced again at the PWM
+    // boundary; this is the policy limit, not the hardware one.
     if (d.left_drpm > max_drpm) d.left_drpm = max_drpm;
     if (d.left_drpm < -max_drpm) d.left_drpm = -max_drpm;
     if (d.right_drpm > max_drpm) d.right_drpm = max_drpm;
@@ -273,15 +300,16 @@ void record_applied(int16_t left_drpm, int16_t right_drpm)
     s.applied_right = right_drpm;
     if (s.nav == NavState::exiting && left_drpm == 0 && right_drpm == 0)
     {
-        s.nav = s.armed ? NavState::idle : NavState::precal_idle;
+        // Never precal_idle: IF-0001 §7.5 reserves that for the post-reset
+        // state, and reporting it after a routine stop would tell the Pi the
+        // machine had lost its calibration.
+        s.nav = NavState::idle;
     }
     taskEXIT_CRITICAL();
 }
 
-void raise_fault(Fault f, uint64_t now_us)
+void raise_fault(Fault f)
 {
-    (void)now_us;
-
     taskENTER_CRITICAL();
     if (s.fault == Fault::none)
     {
@@ -297,41 +325,44 @@ void raise_fault(Fault f, uint64_t now_us)
 
 namespace
 {
-Status fill(uint64_t now_us)
+// Caller must hold the critical section.
+Status fill(uint64_t now)
 {
     Status st{};
     st.state = s.nav;
     st.fault = s.fault;
     st.armed = s.armed;
-    st.cmd_age_ms = s.ever_accepted
-                        ? static_cast<uint32_t>((now_us - s.last_accept_us) / 1000)
-                        : 0xFFFFFFFFu;
+    st.cmd_age_ms =
+        s.ever_accepted
+            ? static_cast<uint32_t>(elapsed(now, s.last_accept_us) / 1000)
+            : 0xFFFFFFFFu;
     st.frames_ok = s.frames_ok;
     st.frames_bad = s.frames_bad;
     st.win_ok = s.win_ok;
     st.win_bad = s.win_bad;
     st.win_hb_missed = s.win_hb_missed;
-    st.win_start_us = s.win_start_us;
+    st.window_ms = static_cast<uint32_t>(elapsed(now, s.win_start_us) / 1000);
     st.left_applied = s.applied_left;
     st.right_applied = s.applied_right;
     return st;
 }
 } // namespace
 
-Status status(uint64_t now_us)
+Status status()
 {
     taskENTER_CRITICAL();
-    const Status st = fill(now_us);
+    const Status st = fill(time_us_64());
     taskEXIT_CRITICAL();
     return st;
 }
 
-Status take_window(uint64_t now_us)
+Status take_window()
 {
     taskENTER_CRITICAL();
-    const Status st = fill(now_us);
+    const uint64_t now = time_us_64();
+    const Status st = fill(now);
     s.win_ok = s.win_bad = s.win_hb_missed = 0;
-    s.win_start_us = now_us;
+    s.win_start_us = now;
     taskEXIT_CRITICAL();
     return st;
 }
