@@ -30,13 +30,13 @@ void init();
 // Formats and enqueues. Never blocks, never allocates. Safe from any task.
 // NOT safe from an ISR — nothing on the safety path should be logging from
 // interrupt context anyway.
-void write(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+void write(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
 
 // Bypasses the ring and writes straight to the UART, blocking until the bytes
 // are out. For boot messages before the scheduler runs, and for panics where
 // the drain task will never get another chance to run. Do not call from the
 // control loop.
-void write_blocking(const char *s);
+void write_blocking(const char* s);
 
 // Drains one batch to the UART. Called by the logger task; returns the number
 // of bytes written so the caller can decide whether to yield.

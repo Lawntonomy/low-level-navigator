@@ -38,8 +38,8 @@ void service_tx();
 // Periodic messages. Each returns false if the frame was dropped.
 bool send_heartbeat();
 bool send_nav_status();
-bool send_wheel_state(int16_t left_drpm, int16_t right_drpm, int16_t left_cmd,
-                      int16_t right_cmd, bool left_valid, bool right_valid);
+bool send_wheel_state(int16_t left_drpm, int16_t right_drpm, int16_t left_cmd, int16_t right_cmd,
+                      bool left_valid, bool right_valid);
 bool send_link_stats();
 bool send_fault_event(uint8_t code, uint8_t nav_state, bool latched);
 

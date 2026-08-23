@@ -285,10 +285,14 @@ Decision evaluate()
 
     // Clamp outside the lock. SAF-14 must be enforced again at the PWM
     // boundary; this is the policy limit, not the hardware one.
-    if (d.left_drpm > max_drpm) d.left_drpm = max_drpm;
-    if (d.left_drpm < -max_drpm) d.left_drpm = -max_drpm;
-    if (d.right_drpm > max_drpm) d.right_drpm = max_drpm;
-    if (d.right_drpm < -max_drpm) d.right_drpm = -max_drpm;
+    if (d.left_drpm > max_drpm)
+        d.left_drpm = max_drpm;
+    if (d.left_drpm < -max_drpm)
+        d.left_drpm = -max_drpm;
+    if (d.right_drpm > max_drpm)
+        d.right_drpm = max_drpm;
+    if (d.right_drpm < -max_drpm)
+        d.right_drpm = -max_drpm;
 
     return d;
 }
@@ -332,10 +336,8 @@ Status fill(uint64_t now)
     st.state = s.nav;
     st.fault = s.fault;
     st.armed = s.armed;
-    st.cmd_age_ms =
-        s.ever_accepted
-            ? static_cast<uint32_t>(elapsed(now, s.last_accept_us) / 1000)
-            : 0xFFFFFFFFu;
+    st.cmd_age_ms = s.ever_accepted ? static_cast<uint32_t>(elapsed(now, s.last_accept_us) / 1000)
+                                    : 0xFFFFFFFFu;
     st.frames_ok = s.frames_ok;
     st.frames_bad = s.frames_bad;
     st.win_ok = s.win_ok;
