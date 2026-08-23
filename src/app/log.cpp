@@ -34,7 +34,7 @@ inline uint32_t used_unsafe()
     return (head - tail) & ring_mask;
 }
 
-void push(const char *src, uint32_t n)
+void push(const char* src, uint32_t n)
 {
     taskENTER_CRITICAL();
     const uint32_t space = ring_mask - used_unsafe();
@@ -68,7 +68,7 @@ void init()
     // unclaimed keeps the pin available.
 }
 
-void write_blocking(const char *s)
+void write_blocking(const char* s)
 {
     while (*s)
     {
@@ -76,7 +76,7 @@ void write_blocking(const char *s)
     }
 }
 
-void write(const char *fmt, ...)
+void write(const char* fmt, ...)
 {
     // On the stack, not static: two tasks on two cores may be here at once,
     // and a shared scratch buffer would interleave their output.
@@ -93,9 +93,8 @@ void write(const char *fmt, ...)
     }
     // vsnprintf returns the length it *would* have written; clamp so a long
     // line is truncated rather than read past the buffer.
-    const uint32_t len = (static_cast<uint32_t>(n) >= sizeof line)
-                             ? sizeof line - 1
-                             : static_cast<uint32_t>(n);
+    const uint32_t len =
+        (static_cast<uint32_t>(n) >= sizeof line) ? sizeof line - 1 : static_cast<uint32_t>(n);
     push(line, len);
 }
 

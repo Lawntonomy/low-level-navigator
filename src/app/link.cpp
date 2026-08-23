@@ -65,7 +65,7 @@ inline uint32_t tx_used_unsafe()
 }
 
 // Caller must hold the critical section.
-bool push_unsafe(const uint8_t *p, uint32_t n)
+bool push_unsafe(const uint8_t* p, uint32_t n)
 {
     if (n > ring_mask - tx_used_unsafe())
     {
@@ -121,37 +121,35 @@ constexpr uint64_t wire_time_us(uint16_t n)
 // time. The length is learned by packing once; both passes carry a non-zero t3
 // so v2's trailing-zero truncation cannot change it between them, which is
 // checked rather than assumed.
-void emit_timesync(const PendingSync &p)
+void emit_timesync(const PendingSync& p)
 {
     uart_tx_wait_blocking(board::cmd_uart());
 
     uint8_t scratch[MAVLINK_MAX_PACKET_LEN];
 
     mavlink_message_t probe;
-    mavlink_msg_lawn_timesync_pack(sysid, compid_self, &probe, p.t1, p.t2,
-                                   time_us_64(), p.seq);
+    mavlink_msg_lawn_timesync_pack(sysid, compid_self, &probe, p.t1, p.t2, time_us_64(), p.seq);
     const uint16_t probe_len = mavlink_msg_to_send_buffer(scratch, &probe);
 
     const uint64_t t3 = time_us_64() + wire_time_us(probe_len);
 
     mavlink_message_t m;
-    mavlink_msg_lawn_timesync_pack(sysid, compid_self, &m, p.t1, p.t2, t3,
-                                   p.seq);
+    mavlink_msg_lawn_timesync_pack(sysid, compid_self, &m, p.t1, p.t2, t3, p.seq);
     const uint16_t len = mavlink_msg_to_send_buffer(scratch, &m);
 
     if (len != probe_len)
     {
         // Length moved between passes, so the wire time we folded into t3 is
         // wrong. Report rather than emit a silently biased sync sample.
-        log_console::write("[link] timesync len %u!=%u, dropped\r\n",
-                           (unsigned)len, (unsigned)probe_len);
+        log_console::write("[link] timesync len %u!=%u, dropped\r\n", (unsigned)len,
+                           (unsigned)probe_len);
         return;
     }
 
     uart_write_blocking(board::cmd_uart(), scratch, len);
 }
 
-void dispatch(const mavlink_message_t *m)
+void dispatch(const mavlink_message_t* m)
 {
     // IF-0001 §3. The parser will happily hand us a well-formed frame from a
     // stranger; dropping it is the receiver's job, not the parser's.
@@ -195,8 +193,8 @@ void dispatch(const mavlink_message_t *m)
         mavlink_lawn_arm_cmd_t a;
         mavlink_msg_lawn_arm_cmd_decode(m, &a);
         safety::on_arm_request(a.arm != 0, a.magic);
-        log_console::write("[link] arm request: arm=%u magic=%04x\r\n",
-                           (unsigned)a.arm, (unsigned)a.magic);
+        log_console::write("[link] arm request: arm=%u magic=%04x\r\n", (unsigned)a.arm,
+                           (unsigned)a.magic);
         break;
     }
 
@@ -223,8 +221,7 @@ void dispatch(const mavlink_message_t *m)
         break;
     }
 
-    default:
-        break;
+    default: break;
     }
 }
 
@@ -253,11 +250,9 @@ bool init()
     // 2% total ACROSS BOTH ENDS, so spending it all here would leave the Pi
     // nothing; D2's table shows 1 Mbaud is exact on both ends, making 1% free.
     const int32_t err_ppm = static_cast<int32_t>(
-        (static_cast<int64_t>(achieved) - board::cmd_baud) * 1000000 /
-        board::cmd_baud);
+        (static_cast<int64_t>(achieved) - board::cmd_baud) * 1000000 / board::cmd_baud);
     log_console::write("[link] baud requested %u achieved %u (%ld ppm)\r\n",
-                       (unsigned)board::cmd_baud, (unsigned)achieved,
-                       (long)err_ppm);
+                       (unsigned)board::cmd_baud, (unsigned)achieved, (long)err_ppm);
 
     return err_ppm > -10000 && err_ppm < 10000;
 }
@@ -347,35 +342,35 @@ bool send_heartbeat()
 {
     const safety::Status st = safety::status();
     const uint32_t sess = safety::session_id();
-    return pack_and_push([&](mavlink_message_t *m) {
-        mavlink_msg_heartbeat_pack(
-            sysid, compid_self, m, MAV_TYPE_GROUND_ROVER,
-            MAV_AUTOPILOT_GENERIC,
-            st.armed ? MAV_MODE_FLAG_SAFETY_ARMED : 0, sess,
-            (st.fault != safety::Fault::none) ? MAV_STATE_CRITICAL
-                                              : MAV_STATE_ACTIVE);
-    });
+    return pack_and_push(
+        [&](mavlink_message_t* m)
+        {
+            mavlink_msg_heartbeat_pack(
+                sysid, compid_self, m, MAV_TYPE_GROUND_ROVER, MAV_AUTOPILOT_GENERIC,
+                st.armed ? MAV_MODE_FLAG_SAFETY_ARMED : 0, sess,
+                (st.fault != safety::Fault::none) ? MAV_STATE_CRITICAL : MAV_STATE_ACTIVE);
+        });
 }
 
 bool send_nav_status()
 {
     const safety::Status st = safety::status();
     const uint64_t now = time_us_64();
-    const uint16_t age =
-        (st.cmd_age_ms == 0xFFFFFFFFu)
-            ? 65535
-            : static_cast<uint16_t>(st.cmd_age_ms > 65534 ? 65534 : st.cmd_age_ms);
+    const uint16_t age = (st.cmd_age_ms == 0xFFFFFFFFu)
+                             ? 65535
+                             : static_cast<uint16_t>(st.cmd_age_ms > 65534 ? 65534 : st.cmd_age_ms);
 
-    return pack_and_push([&](mavlink_message_t *m) {
-        mavlink_msg_lawn_nav_status_pack(sysid, compid_self, m, now, age,
-                                         static_cast<uint8_t>(st.state),
-                                         st.armed ? 1 : 0,
-                                         static_cast<uint8_t>(st.fault));
-    });
+    return pack_and_push(
+        [&](mavlink_message_t* m)
+        {
+            mavlink_msg_lawn_nav_status_pack(sysid, compid_self, m, now, age,
+                                             static_cast<uint8_t>(st.state), st.armed ? 1 : 0,
+                                             static_cast<uint8_t>(st.fault));
+        });
 }
 
-bool send_wheel_state(int16_t left_drpm, int16_t right_drpm, int16_t left_cmd,
-                      int16_t right_cmd, bool left_valid, bool right_valid)
+bool send_wheel_state(int16_t left_drpm, int16_t right_drpm, int16_t left_cmd, int16_t right_cmd,
+                      bool left_valid, bool right_valid)
 {
     uint8_t flags = LAWN_WHEEL_DIR_UNMEASURED; // ADR-0002: always set today
     if (left_valid)
@@ -388,11 +383,12 @@ bool send_wheel_state(int16_t left_drpm, int16_t right_drpm, int16_t left_cmd,
     }
     const uint64_t now = time_us_64();
 
-    return pack_and_push([&](mavlink_message_t *m) {
-        mavlink_msg_lawn_wheel_state_pack(sysid, compid_self, m, now, left_drpm,
-                                          right_drpm, left_cmd, right_cmd,
-                                          flags);
-    });
+    return pack_and_push(
+        [&](mavlink_message_t* m)
+        {
+            mavlink_msg_lawn_wheel_state_pack(sysid, compid_self, m, now, left_drpm, right_drpm,
+                                              left_cmd, right_cmd, flags);
+        });
 }
 
 bool send_link_stats()
@@ -400,25 +396,28 @@ bool send_link_stats()
     const safety::Status st = safety::take_window();
     const uint64_t now = time_us_64();
     const uint32_t total = st.win_ok + st.win_bad;
-    const uint8_t quality =
-        total ? static_cast<uint8_t>((st.win_ok * 100u) / total) : 0u;
+    const uint8_t quality = total ? static_cast<uint8_t>((st.win_ok * 100u) / total) : 0u;
     const uint32_t dropped = tx_drop + log_console::dropped();
 
-    return pack_and_push([&](mavlink_message_t *m) {
-        mavlink_msg_lawn_link_stats_pack(
-            sysid, compid_self, m, now, st.win_ok, st.win_bad, dropped,
-            static_cast<uint16_t>(st.window_ms > 65535 ? 65535 : st.window_ms),
-            static_cast<uint16_t>(st.win_hb_missed), quality);
-    });
+    return pack_and_push(
+        [&](mavlink_message_t* m)
+        {
+            mavlink_msg_lawn_link_stats_pack(
+                sysid, compid_self, m, now, st.win_ok, st.win_bad, dropped,
+                static_cast<uint16_t>(st.window_ms > 65535 ? 65535 : st.window_ms),
+                static_cast<uint16_t>(st.win_hb_missed), quality);
+        });
 }
 
 bool send_fault_event(uint8_t code, uint8_t nav_state, bool latched)
 {
     const uint64_t now = time_us_64();
-    return pack_and_push([&](mavlink_message_t *m) {
-        mavlink_msg_lawn_fault_event_pack(sysid, compid_self, m, now, code,
-                                          nav_state, latched ? 1 : 0);
-    });
+    return pack_and_push(
+        [&](mavlink_message_t* m)
+        {
+            mavlink_msg_lawn_fault_event_pack(sysid, compid_self, m, now, code, nav_state,
+                                              latched ? 1 : 0);
+        });
 }
 
 uint32_t tx_dropped()
