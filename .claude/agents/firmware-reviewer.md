@@ -1,6 +1,6 @@
 ---
 name: firmware-reviewer
-description: Reviews firmware changes for embedded and RTOS defects that compile cleanly but fail on hardware — DMA/PIO/GPIO resource conflicts, unsynchronized ISR- or DMA-shared state, stale sensor data, float comparisons in control flow, uninitialized members, sign errors in control math, FreeRTOS task and stack problems. Use before flashing any change that touches src/hardware_drivers/, src/high_level_drivers/, or the control loop in low-level-navigator.cpp. Not a style reviewer.
+description: Reviews firmware changes for embedded and RTOS defects that compile cleanly but fail on hardware — DMA/PIO/GPIO resource conflicts, unsynchronized ISR- or DMA-shared state, stale sensor data, float comparisons in control flow, uninitialized members, sign errors in control math, FreeRTOS task and stack problems. Use before flashing any change that touches src/app/, src/hardware_drivers/, src/high_level_drivers/, or the task foundation in src/main.cpp. Not a style reviewer.
 tools: Read, Grep, Glob, Bash
 model: opus
 color: orange

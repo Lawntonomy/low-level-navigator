@@ -4,137 +4,144 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Firmware for the "low-level navigator" board of Lawntonomy, an autonomous lawnmower. It runs on a
-Raspberry Pi Pico 2 (RP2350, `PICO_BOARD=pico2`) under FreeRTOS and closes the motor control loop:
-read quadrature encoders via PIO, run a PID controller per wheel, and drive motor PWM via PIO. A
-higher-level system (not in this repo) is expected to send guidance/navigation commands to this
-board; this board is only responsible for turning those into wheel motion.
+Firmware for the low-level tier of Lawntonomy, an autonomous lawnmower. It runs on a Raspberry Pi
+Pico 2 (RP2350, `PICO_BOARD=pico2`) under FreeRTOS and owns **everything that can move the
+machine**: motor drive, encoder capture, inertial sensing, arming, and the failsafe.
+
+A Raspberry Pi runs planning and issues navigation *requests* over a MAVLink link. Per ADR-0001 the
+low-level tier is independently safe: it does not assume the high-level tier is alive, correct, or
+timely, and the Pi reboots as a *routine* event during image updates.
+
+**The design authority is a separate repository**, normally checked out alongside this one at
+`../system-design`:
+
+- `adr/` — accepted decision records. Immutable; a new ADR supersedes rather than edits.
+- `requirements/` — `SAF-*` and `NAV-*`, each with current status.
+- `interfaces/inter-tier-protocol.md` — **IF-0001**, the wire protocol this firmware implements.
+
+Read the relevant records before changing behaviour. Reads outside this repo may prompt.
 
 ## Build
 
-Build happens inside Docker (the container has the ARM toolchain, Pico SDK, picotool, and
-FreeRTOS-Kernel pinned to known-good checkouts):
+**Local build (preferred — fast, no container):**
 
 ```bash
-docker build -t low-level-navigator .
-docker run --rm -v $(pwd):/workspace low-level-navigator
+cmake -S . -B build-local \
+  -DPICO_SDK_PATH=$HOME/Documents/pico-sdk \
+  -DFREERTOS_KERNEL_PATH=$HOME/Documents/FreeRTOS-Kernel \
+  -DPICO_BOARD=pico2 -DCMAKE_BUILD_TYPE=Debug
+cmake --build build-local -j"$(nproc)"
 ```
 
-This produces `build/low-level-nav.uf2` (flash by holding BOOTSEL and copying the file to the
-Pico's mass-storage drive), plus `.elf`/`.bin`/`.hex`/`.map`.
+Produces `build-local/low-level-nav.uf2` plus `.elf`/`.bin`/`.map`.
 
-To build outside Docker (e.g. with local SDK checkouts), use `scripts/build.sh`, which expects
-sibling checkouts at `../../pico-sdk`, `../../pico-tool`, and `../../FreeRTOS-Kernel`, then runs:
+Docker remains available (`docker build -t low-level-navigator . && docker run --rm -v $(pwd):/workspace low-level-navigator`)
+but is **not** usable by the current user, who is not in the `docker` group. Prefer the local build.
 
-```bash
-cmake .. -DPICO_SDK_PATH=$PICO_SDK_PATH -DPICO_BOARD=pico2 \
-         -Dpicotool_DIR=$PICO_TOOL_PATH -DFREERTOS_KERNEL_PATH=$FreeRTOS_PATH \
-         -DCMAKE_EXPORT_COMPILE_COMMANDS=1 && make
-```
+`scripts/build.sh` has stale relative paths (`../../pico-sdk`) from before this repo moved under
+`Lawntonomy/`. Use the command above rather than the script until it is fixed.
 
 ## Test
 
 Host-side unit tests live in `test/` as a **separate CMake project** — host compiler, no Pico SDK,
-no ARM toolchain, no `pico_sdk_init()`. Only hardware-independent logic is compiled in.
+no ARM toolchain, no `pico_sdk_init()`. Only hardware-independent logic compiles in.
 
 ```bash
 ./scripts/test.sh
+./build-test/lln_tests --gtest_filter='PidClass.*'          # one suite
+./build-test/lln_tests --gtest_also_run_disabled_tests      # the known-defect set
 ```
 
-First run downloads googletest via CMake FetchContent (needs network); later runs use the copy
-cached in `build-test/`. To run one test or one suite:
+First run fetches googletest (needs network); later runs use the cache in `build-test/`.
 
-```bash
-./build-test/lln_tests --gtest_filter='PidClass.ProportionalResponseToPositiveError'
-```
+Tests named `DISABLED_*` document **known, unfixed defects**: each asserts the behaviour the code
+*should* have and currently fails. When fixing one, drop the prefix so the test becomes the
+regression guard. See issues #12 and #13.
 
-Tests named `DISABLED_*` document known defects: each asserts the behavior the code *should* have
-and currently fails. Run them with `./build-test/lln_tests --gtest_also_run_disabled_tests`. When
-fixing one of these bugs, drop the `DISABLED_` prefix so the test becomes the regression guard.
-
-Production code that needs to be testable must not depend on the Pico SDK or FreeRTOS in its
-header. `test/stubs/logger_stub.cpp` provides a host implementation of `Log::` so code under test
-can keep its logging calls; add similar stubs rather than stripping calls out of production code.
-
-The `include/googletest` directory is empty and the `enable_testing()`/`gtest_discover_tests()`
-lines in the firmware [CMakeLists.txt](CMakeLists.txt) are commented out — both are dead
-scaffolding from an earlier attempt, superseded by `test/`.
+Production code that must be testable may not depend on the Pico SDK or FreeRTOS *in its header*.
+`test/stubs/logger_stub.cpp` provides a host `Log::` so code under test keeps its logging calls;
+add stubs rather than stripping calls from production code.
 
 ## Verification expectations
 
-Claude cannot run this firmware: there is no emulator and no hardware in the loop. When reporting
-on a change, state explicitly which of these applies rather than saying "done":
+There is no emulator and no hardware in the loop from a Claude session. State which of these
+applies rather than saying "done":
 
 - **Unit tested** — covered by a test in `test/` that was actually run.
-- **Compiles only** — built, but behavior unverified.
-- **Not verified** — needs bench testing on hardware. Say what to watch on the UART.
-
-Note that `docker` currently requires group membership the user does not have, so even the firmware
-build may not be runnable from a Claude session — do not claim a successful build without one.
+- **Compiles only** — built via the local build above. This *is* now achievable; don't claim it
+  without running it.
+- **Not verified** — needs bench testing. Say what to watch on the UART.
 
 ## Lint
 
-CI runs `clang-format -style=file` (config in [.clang-format](.clang-format)) over every
-`.cpp/.hpp/.cu/.c/.h` file and fails the build on any diff. Run the same check locally before
-pushing:
+CI runs `clang-format -style=file` over every `.cpp/.hpp/.cu/.c/.h` and fails on any diff.
+**`mavlink/` is vendored and excluded** — do not reformat it.
 
 ```bash
-find . -regex '.*\.\(cpp\|hpp\|cu\|c\|h\)' -exec clang-format -style=file -i {} \;
+find src test link-stub -regex '.*\.\(cpp\|hpp\|c\|h\)' -exec clang-format -style=file -i {} \;
 ```
 
-`.clang-tidy` enforces naming conventions: `PascalCase` classes/namespaces/enums, `camelCase`
-functions/parameters, `snake_case` variables, `UPPER_CASE` globals.
+`.clang-tidy` sets naming: `PascalCase` types/namespaces, `camelCase` functions/parameters,
+`snake_case` variables, `UPPER_CASE` globals.
 
 ## Architecture
 
-- **`src/hardware_drivers/`** — thin, direct-register/PIO drivers with no business logic:
-  `encoder.cpp/.pio`, `pwm.cpp/.pio` (PIO-based PWM for motor drive), `ws2812.pio` (status
-  NeoPixel), `gpio_defines.h` (single source of truth for pin assignments and constants like
-  `pwm_frequency`/`encoder_ticks`).
+**`src/main.cpp`** — the FreeRTOS task foundation and `main()`. Creates `control`, `link_rx`,
+`link_tx`, `telem`, and `logger` tasks via `must_create`, which **halts rather than continuing** if
+a task cannot be created — firmware that silently boots without its control task is worse than
+firmware that refuses to boot. Also holds the stack-overflow hook. The watchdog is armed last so a
+slow boot cannot trip it before the control task exists.
 
-  **The encoders are not quadrature.** `encoder.pio` is a single-pin period counter — one GPIO per
-  side, counting PIO cycles between high→low transitions and pushing the count to a DMA ring
-  buffer. `get_left_rpm`/`get_right_rpm` return an unsigned magnitude only; **direction is not
-  measurable**. The sign is manufactured in `main()` by negating according to the *commanded*
-  direction, so a wheel rolling backwards while commanded forward reads as forward motion. Fixing
-  that needs a second channel per encoder, not a firmware change.
+**`src/app/`** — application layer, and where the safety argument lives:
 
-  `pwm.pio` counts Y down from the period and raises the pin only when `X == Y`, so a level
-  **above** the period never matches and produces 0% duty rather than 100%. Always clamp to the
-  period before writing.
-- **`src/high_level_drivers/`** — hardware-agnostic control logic: `pid.cpp/.hpp` (a per-wheel
-  `PidClass` with configurable output clamping) and `navigator.cpp/.hpp`, which is currently a stub
-  — the state-machine design described below and in [README.md](README.md) is not implemented yet.
-- **`src/utility/logger.*`** — a `Log` static class intended to run as a FreeRTOS task
-  (`logger_task`) with `trace`/`info`/`warn`/`debug`/`error` levels.
-- **`src/low-level-navigator.cpp`** — current `main()`. This is a flat, pre-state-machine control
-  loop (no FreeRTOS tasks yet): init GPIO/PIO, run two `PidClass` instances closed over encoder RPM
-  vs. a hardcoded `left_target`/`right_target`, write PWM, and flip direction GPIOs when a wheel
-  crosses zero RPM. Treat this file as the integration point that the state machine below is meant
-  to replace.
+- `rt.h` — the real-time structure in one place: every task priority, stack size, core affinity and
+  period, each with its reason. Change timing here, not scattered through call sites.
+- `safety.{hpp,cpp}` — arming, command freshness, fault state. **Owns every decision the high-level
+  tier is not allowed to make** (`SAF-33`, IF-0001 §8).
+- `link.{hpp,cpp}` — MAVLink transport for the command link. Deliberately does **not** expose
+  MAVLink types outward, so the control path never depends on wire representation.
+- `log.{hpp,cpp}` — non-blocking console logging. Per ADR-0003 logging is diagnostic and must never
+  be required for safe operation, nor block the control loop.
+- `board.h` — link and instrumentation pins. Motor/encoder/NeoPixel pins stay in
+  `hardware_drivers/gpio_defines.h` so the two do not tangle.
 
-### Intended state machine (design target, not yet built)
+**`src/hardware_drivers/`** — thin PIO/DMA drivers, no business logic. `encoder.cpp/.pio`,
+`pwm.cpp/.pio`, `ws2812.pio`, `gpio_defines.h`. PIO headers are generated by
+`pico_generate_pio_header` in [CMakeLists.txt](CMakeLists.txt).
 
-Per [README.md](README.md), the navigator is meant to be a state machine:
+Two hardware facts that are **not** obvious from the code and have already caused wrong
+documentation once:
 
-1. **Pre-Calibration Idle** — no commands, zero speed, no valid calibration.
-2. **Calibration** — running the calibration process.
-3. **Idle Navigation** — valid calibration, no guidance commands.
-4. **Active Guidance** — actively executing guidance commands.
-5. **Exiting Guidance** — no new guidance commands, still executing in-flight ones, ramping to 0.
+> **The encoders are not quadrature.** `encoder.pio` is a single-pin period counter — one GPIO per
+> side, counting PIO cycles between high→low transitions into a DMA ring buffer.
+> `get_left_rpm`/`get_right_rpm` return an **unsigned magnitude**; direction is *not measurable*.
+> Fixing that needs a second channel per encoder, not a firmware change. See issue #12 — a stalled
+> wheel also reports its pre-stall speed indefinitely, because DREQ pacing means the DMA simply
+> stops rather than writing zeros.
 
-A related known gap (see comment in [navigator.cpp](src/high_level_drivers/navigator.cpp)): wheel
-direction must never jump straight from forward to backward. Transitions should go
-`forward -> stopped -> backward` (and the reverse), never directly across zero.
+> **`pwm.pio` raises its pin only when `X == Y`** while counting Y down from the period, so a level
+> **above** the period produces **0% duty, not 100%**. Always clamp to the period before writing.
 
-### Pin/hardware notes
+**`src/high_level_drivers/`** — `pid.{cpp,hpp}` (per-wheel `PidClass`, host-testable) and
+`navigator.{cpp,hpp}`, still a stub.
 
-Pin assignments live in [gpio_defines.h](src/hardware_drivers/gpio_defines.h) as the
-`gpio::pins` enum — check there before wiring new hardware. UART is on GPIO 0/1
-([docs/config1.md](docs/config1.md)); the default stdio UART pins are overridden to 16/17 in
-[CMakeLists.txt](CMakeLists.txt).
+**`mavlink/`** — generated bindings for the Lawntonomy dialect: `c/` for firmware, `python/` for the
+Pi and bench. **Generated, vendored, and excluded from lint** — regenerate with the pinned
+`pymavlink`, never hand-edit.
+
+**`link-stub/`** — minimal bring-up stubs for both tiers (`pico/`, `pi/`), used to validate the
+transport independently of the firmware. `pi/selftest.py` verifies frame sizes.
 
 ## Task tracking
 
-Work is tracked as GitHub Issues on `Lawntonomy/low-level-navigator`. Use the `gh` CLI
-(`gh issue list`, `gh issue view <n>`, `gh issue create`) rather than a local backlog file.
+GitHub Issues on `Lawntonomy/low-level-navigator` via `gh` (`gh issue list/view/create/comment`),
+not a local backlog file. Cite `SAF-*` IDs from `../system-design/requirements/` where a change
+bears on one.
+
+## Subagents
+
+`.claude/agents/` defines five reviewers — `firmware-reviewer`, `safety-reviewer`,
+`architecture-advisor`, `hardware-researcher`, `linux-platform-researcher`. **They only register
+when the session's working directory is this repository**, not the `Lawntonomy/` umbrella
+directory. Working from the umbrella means passing their personas to a general-purpose agent
+inline.
