@@ -78,8 +78,13 @@ CI runs `clang-format -style=file` over every `.cpp/.hpp/.cu/.c/.h` and fails on
 **`mavlink/` is vendored and excluded** — do not reformat it.
 
 ```bash
-find src test link-stub -regex '.*\.\(cpp\|hpp\|c\|h\)' -exec clang-format -style=file -i {} \;
+git ls-files -- 'src/*' 'test/*' 'link-stub/*' | grep -E '\.(cpp|hpp|c|h)$' \
+  | xargs clang-format -style=file -i
 ```
+
+Use `git ls-files` rather than `find`: local build directories under `link-stub/pico/build/`
+contain generated SDK headers that will never satisfy the format check. They are git-ignored, so
+CI never sees them, but a bare `find` will report them as failures.
 
 `.clang-tidy` sets naming: `PascalCase` types/namespaces, `camelCase` functions/parameters,
 `snake_case` variables, `UPPER_CASE` globals.
