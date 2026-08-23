@@ -1,4 +1,6 @@
 build
+build-fw
+build-local
 build-test
 
 # The RP2350 datasheet is ~8MB and CC BY-ND licensed; keeping it out of git
