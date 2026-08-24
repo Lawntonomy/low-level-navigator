@@ -24,6 +24,7 @@ set(LLN_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../src)
 
 add_executable(lln_tests
     test_pid.cpp
+    test_encoder_math.cpp
     stubs/logger_stub.cpp
     ${LLN_SRC_DIR}/high_level_drivers/pid.cpp
 )
