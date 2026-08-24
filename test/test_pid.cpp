@@ -344,6 +344,161 @@ TEST(PidClass, AntiWindupHonoursAppliedValue)
     }
 }
 
+// Step 7 -- bounding the integral to [min/ki, max/ki] -- is only separable from
+// the conditional integration of step 6 when the LIMITS MOVE. The orphaned
+// superloop rewrote the output limits on every iteration, so this is not a
+// hypothetical: the integral here is accumulated entirely legitimately, under
+// limits it never came close to, and is only excessive after the range narrows
+// underneath it. Step 6 has no cause to block any of that accumulation and
+// cannot undo it afterwards.
+TEST(PidClass, NarrowedOutputLimitsBoundTheExistingIntegral)
+{
+    PidClass pid = make_pid(0.0f, 100.0f, 0.0f, /*max=*/1000.0f, /*min=*/-1000.0f);
+
+    // 100 cycles of e = 10 at dt = 0.005 leave the integral at 5, i.e. a
+    // 500-count term against a 1000-count ceiling. Nothing saturates on the way
+    // there, and 5 is well inside the step 7 bound of max/ki = 10.
+    for (int i = 0; i < 100; ++i)
+    {
+        pid.control_loop(0.0f, 10.0f, kDt);
+    }
+    // Probe at zero error: with kp = kd = 0 the returned value is ki * integral,
+    // and a zero error leaves the accumulator untouched.
+    ASSERT_FLOAT_EQ(pid.control_loop(0.0f, 0.0f, kDt), 500.0f);
+
+    pid.set_output_limits(-50.0f, 50.0f);
+
+    // One cycle under the new limits. The output is clamped, as it must be...
+    EXPECT_FLOAT_EQ(pid.control_loop(0.0f, 0.0f, kDt), 50.0f);
+    EXPECT_TRUE(pid.saturated());
+
+    // ...but the clamp only masks the oversized integral; it does not correct
+    // it. Widening the range again makes the accumulator observable, which is
+    // the only reason this call is here. The integral must have been pulled
+    // down to max/ki = 0.5, a 50-count term -- the most the narrow range could
+    // ever have authorised. Without step 7 it is still 5, and the controller
+    // carries a 500-count term it accumulated under limits that no longer
+    // apply, taking ten times as long to unwind.
+    pid.set_output_limits(-1000.0f, 1000.0f);
+    EXPECT_FLOAT_EQ(pid.control_loop(0.0f, 0.0f, kDt), 50.0f);
+}
+
+// --------------------------------------------------------------------------
+// Non-finite inputs. std::clamp(v, lo, hi) returns v when both comparisons are
+// false, which is exactly what a NaN gives -- so neither the dt clamp nor the
+// output clamp is a guard against one.
+// --------------------------------------------------------------------------
+
+TEST(PidClass, NonFiniteDtFallsBackToTheNominalPeriod)
+{
+    // Unguarded, a NaN dt makes the derivative divisor NaN and the output clamp
+    // passes the NaN straight through into a motor command.
+    PidClass nan_dt = make_pid(0.0f, 0.0f, 2.0f);
+    ASSERT_FLOAT_EQ(nan_dt.control_loop(0.0f, 0.0f, kDt), 0.0f);
+
+    // Substituting the nominal 5 ms gives the same answer as
+    // DerivativeOpposesMeasurementChange: d = -200, term = -400.
+    const float from_nan = nan_dt.control_loop(1.0f, 0.0f, std::numeric_limits<float>::quiet_NaN());
+    EXPECT_TRUE(std::isfinite(from_nan));
+    EXPECT_FLOAT_EQ(from_nan, -400.0f);
+
+    // An infinite dt does survive the clamp, but as dt_max (0.025 s), which
+    // silently divides the derivative by five. Same substitution.
+    PidClass inf_dt = make_pid(0.0f, 0.0f, 2.0f);
+    ASSERT_FLOAT_EQ(inf_dt.control_loop(0.0f, 0.0f, kDt), 0.0f);
+
+    const float from_inf = inf_dt.control_loop(1.0f, 0.0f, std::numeric_limits<float>::infinity());
+    EXPECT_TRUE(std::isfinite(from_inf));
+    EXPECT_FLOAT_EQ(from_inf, -400.0f);
+}
+
+// Defence in depth: the encoder reports Reading{rpm, valid} and the caller is
+// supposed to gate on `valid`. A controller that emits NaN when it is lied to
+// anyway is a poor last line.
+TEST(PidClass, NonFiniteMeasurementOrSetpointReturnsZeroAndLeavesStateUntouched)
+{
+    PidClass pid = make_pid(1.0f, 5.0f, 3.0f, /*max=*/1000.0f, /*min=*/-1000.0f);
+    PidClass twin = make_pid(1.0f, 5.0f, 3.0f, /*max=*/1000.0f, /*min=*/-1000.0f);
+
+    for (int i = 0; i < 20; ++i)
+    {
+        const float measurement = static_cast<float>(i);
+        pid.control_loop(measurement, 50.0f, kDt);
+        twin.control_loop(measurement, 50.0f, kDt);
+    }
+
+    const float not_a_number = std::numeric_limits<float>::quiet_NaN();
+    const float infinite = std::numeric_limits<float>::infinity();
+
+    // Zero is the safe value BECAUSE IT IS AN OUTPUT: it commands no drive.
+    EXPECT_FLOAT_EQ(pid.control_loop(not_a_number, 50.0f, kDt), 0.0f);
+    EXPECT_FLOAT_EQ(pid.control_loop(19.0f, not_a_number, kDt), 0.0f);
+    EXPECT_FLOAT_EQ(pid.control_loop(infinite, 50.0f, kDt), 0.0f);
+    EXPECT_FLOAT_EQ(pid.control_loop(19.0f, -infinite, kDt), 0.0f);
+
+    // The twin was never shown any of them. An unusable sample must not reach
+    // the integral or become the derivative history, so the next good cycle
+    // must be identical for both controllers.
+    EXPECT_FLOAT_EQ(pid.control_loop(20.0f, 50.0f, kDt), twin.control_loop(20.0f, 50.0f, kDt));
+    EXPECT_FLOAT_EQ(pid.control_loop(21.0f, 50.0f, kDt), twin.control_loop(21.0f, 50.0f, kDt));
+}
+
+// --------------------------------------------------------------------------
+// reset() must be total.
+// --------------------------------------------------------------------------
+
+TEST(PidClass, ResetClearsTheAppliedValue)
+{
+    PidClass pid = make_pid(0.0f, 100.0f, 0.0f, /*max=*/50.0f, /*min=*/-50.0f);
+
+    // A downstream stage pinned at the ceiling blocks positive integration, so
+    // the controller sits at zero however long the error persists.
+    for (int i = 0; i < 10; ++i)
+    {
+        pid.note_applied(50.0f);
+        ASSERT_FLOAT_EQ(pid.control_loop(0.0f, 1.0f, kDt), 0.0f);
+    }
+
+    pid.reset();
+
+    // A reset taken in that state must clear the controller's belief about what
+    // was last applied too. Left stale at 50, it goes on blocking positive
+    // integration until the next note_applied() -- a reset that does not fully
+    // reset. Nothing calls note_applied() below, so a reset controller and a
+    // fresh one must track each other exactly.
+    PidClass fresh = make_pid(0.0f, 100.0f, 0.0f, /*max=*/50.0f, /*min=*/-50.0f);
+    for (int i = 0; i < 5; ++i)
+    {
+        EXPECT_FLOAT_EQ(pid.control_loop(0.0f, 1.0f, kDt), fresh.control_loop(0.0f, 1.0f, kDt));
+    }
+
+    // ki * integral after five cycles of e = 1 at dt = 0.005 is 2.5, not 0.
+    EXPECT_GT(pid.control_loop(0.0f, 1.0f, kDt), 0.0f);
+}
+
+// A negative ki inverts [min/ki, max/ki], which is the same lo > hi case that
+// set_output_limits rejects for the limits themselves -- undefined behaviour in
+// std::clamp. Gains are not validated here (whether they should be is a
+// separate decision), so the bound is ordered explicitly instead. This asserts
+// the resulting defined behaviour: the integral term saturates and STAYS there.
+// Unordered, the bound alternates between the two rails and the command
+// oscillates full-scale, which on a motor is considerably worse than wrong.
+TEST(PidClass, NegativeKiDoesNotInvertTheIntegralBound)
+{
+    PidClass pid = make_pid(0.0f, -100.0f, 0.0f, /*max=*/50.0f, /*min=*/-50.0f);
+
+    for (int i = 0; i < 20; ++i)
+    {
+        pid.control_loop(0.0f, 10.0f, kDt);
+    }
+
+    // integral pinned at max/|ki| = 0.5, so the term sits at -50 and holds.
+    for (int i = 0; i < 10; ++i)
+    {
+        ASSERT_FLOAT_EQ(pid.control_loop(0.0f, 10.0f, kDt), -50.0f) << "cycle " << i;
+    }
+}
+
 TEST(PidClass, ZeroKiDoesNotDivideByZero)
 {
     // ki = 0 is the live configuration, so the integral bound divides by zero

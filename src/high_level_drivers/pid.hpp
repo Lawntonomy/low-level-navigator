@@ -28,14 +28,20 @@ class PidClass
 
     // One control cycle. `dt` is the elapsed time in SECONDS since the previous
     // call; it is clamped to a sane window rather than rejected, so that a late
-    // or duplicated cycle can never skip the state update.
+    // or duplicated cycle can never skip the state update. A non-finite `dt`
+    // (which the clamp cannot catch) falls back to the nominal control period.
+    //
+    // A non-finite `measurement` or `setpoint` returns 0.0f and updates no
+    // state: the sample is unusable, and a zero OUTPUT means "do not drive".
     float control_loop(float measurement, float setpoint, float dt);
 
     // What the downstream stages (slew limit, deadband map, PWM clamp) actually
     // sent. Feeds conditional-integration anti-windup.
     void note_applied(float applied);
 
-    // Clears the integral, the derivative history and the saturation flag.
+    // Clears the integral, the derivative history, the saturation flag and the
+    // last note_applied() value, so a reset controller is indistinguishable
+    // from a freshly constructed one.
     void reset();
 
     // True when the last control_loop() call had to clamp its output. Replaces

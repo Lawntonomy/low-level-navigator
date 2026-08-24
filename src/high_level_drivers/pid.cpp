@@ -41,6 +41,35 @@ PidClass::~PidClass()
 
 float PidClass::control_loop(float measurement, float setpoint, float dt)
 {
+    // std::clamp returns its input unchanged when both comparisons are false,
+    // which is precisely what a NaN produces -- so the dt clamp below is not a
+    // guard against non-finite input, and neither is the output clamp at the
+    // end. Both have to be checked explicitly, before they are relied on.
+
+    // Defence in depth. The encoder reports Reading{rpm, valid} and the caller
+    // is supposed to gate on `valid`, but a controller that emits NaN when it
+    // is lied to is a poor last line. Returning zero is safe here BECAUSE IT IS
+    // AN OUTPUT: a zero command means "do not drive", which is the correct
+    // response to an unusable input. A zero *measurement* would be a different
+    // thing entirely -- a lie about the plant, claiming the wheel is stopped --
+    // and must never be synthesised that way.
+    //
+    // No state is updated on this path. The sample is unusable, so integrating
+    // it or adopting it as the derivative history would corrupt the next cycle
+    // that does have good data. saturated() likewise keeps reporting the last
+    // real cycle rather than claiming a fresh, fabricated result.
+    if (!std::isfinite(measurement) || !std::isfinite(setpoint))
+    {
+        return 0.0f;
+    }
+
+    // A caller passing a non-finite dt is broken, but substituting the nominal
+    // control period keeps the loop running with slightly wrong integral
+    // scaling, which beats emitting NaN into a motor command.
+    if (!std::isfinite(dt))
+    {
+        dt = control_period_s;
+    }
     dt = std::clamp(dt, dt_min_s, dt_max_s);
 
     const float error = setpoint - measurement;
@@ -76,7 +105,14 @@ float PidClass::control_loop(float measurement, float setpoint, float dt)
     // theoretical one.
     if (ki_ != 0.0f)
     {
-        integral_ = std::clamp(integral_, min_output_ / ki_, max_output_ / ki_);
+        // The bounds are ordered explicitly rather than passed in min/max
+        // order: a negative ki_ swaps them, and std::clamp with lo > hi is the
+        // same undefined behaviour that set_output_limits rejects for the
+        // limits themselves. Negative gains are not rejected here -- whether
+        // gains should be validated at all is a separate decision.
+        const float a = min_output_ / ki_;
+        const float b = max_output_ / ki_;
+        integral_ = std::clamp(integral_, std::min(a, b), std::max(a, b));
     }
 
     return output;
@@ -93,6 +129,12 @@ void PidClass::reset()
     prior_measurement_ = 0.0f;
     have_prior_ = false;
     saturated_ = false;
+
+    // Also the downstream feedback. A reset taken while the slew limiter or
+    // deadband map was pinned at a limit would otherwise leave applied_ at that
+    // limit and block integration in that direction until the next
+    // note_applied() -- a reset that does not fully reset.
+    applied_ = 0.0f;
 }
 
 bool PidClass::saturated() const
