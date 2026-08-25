@@ -35,6 +35,16 @@ void rx_poll();
 // Called by the link TX task, which is the sole writer.
 void service_tx();
 
+// True once the TX ring is empty AND the UART shift register has drained, so
+// nothing this module was asked to send is still in flight.
+//
+// TX-task only, and only immediately after service_tx(): it waits on the UART,
+// which no other task may touch. Exists for the link-commanded BOOTSEL reboot
+// (bootloader.hpp), where the reset does not return and a frame cut in half is
+// worse for the far end than a frame never sent. Returns false rather than
+// spinning when the ring still holds bytes — the caller retries next pass.
+bool tx_quiesce();
+
 // Periodic messages. Each returns false if the frame was dropped.
 bool send_heartbeat();
 bool send_nav_status();

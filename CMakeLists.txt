@@ -41,7 +41,9 @@ target_sources(
     ${PROJECT_NAME}
     PUBLIC  
     ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/app/bootloader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/link.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/app/motors.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/log.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/safety.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/hardware_drivers/encoder.cpp
@@ -89,6 +91,10 @@ target_link_libraries(${PROJECT_NAME}
   #pico_async_context_freertos
   pico_multicore
   pico_rand
+  # Link-commanded reboot into BOOTSEL (src/app/bootloader.cpp). A bootrom
+  # call, not a USB stack: it is what lets remote reflashing work while
+  # TP-0001 D5 keeps both stdio backends disabled above.
+  pico_bootrom
   hardware_watchdog
   hardware_uart
   FreeRTOS-Kernel-Heap4

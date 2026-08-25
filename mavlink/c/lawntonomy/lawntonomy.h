@@ -10,7 +10,7 @@
     #error Wrong include order: MAVLINK_LAWNTONOMY.H MUST NOT BE DIRECTLY USED. Include mavlink.h from the same directory instead or set ALL AND EVERY defines from MAVLINK.H manually accordingly, including the #define MAVLINK_H call.
 #endif
 
-#define MAVLINK_LAWNTONOMY_XML_HASH 9065425222778940082
+#define MAVLINK_LAWNTONOMY_XML_HASH -7094763504483409233
 
 #ifdef __cplusplus
 extern "C" {
@@ -23,7 +23,7 @@ extern "C" {
 #endif
 
 #ifndef MAVLINK_MESSAGE_CRCS
-#define MAVLINK_MESSAGE_CRCS {{0, 50, 9, 9, 0, 0, 0}, {42001, 158, 4, 4, 0, 0, 0}, {42002, 10, 3, 3, 0, 0, 0}, {42003, 119, 1, 1, 0, 0, 0}, {42010, 131, 13, 13, 0, 0, 0}, {42011, 90, 17, 17, 0, 0, 0}, {42012, 214, 25, 25, 0, 0, 0}, {42013, 223, 12, 12, 0, 0, 0}, {42020, 72, 25, 25, 0, 0, 0}, {42030, 63, 21, 21, 0, 0, 0}}
+#define MAVLINK_MESSAGE_CRCS {{0, 50, 9, 9, 0, 0, 0}, {42001, 158, 4, 4, 0, 0, 0}, {42002, 10, 3, 3, 0, 0, 0}, {42003, 119, 1, 1, 0, 0, 0}, {42004, 68, 4, 4, 0, 0, 0}, {42010, 131, 13, 13, 0, 0, 0}, {42011, 90, 17, 17, 0, 0, 0}, {42012, 214, 25, 25, 0, 0, 0}, {42013, 223, 12, 12, 0, 0, 0}, {42020, 72, 25, 25, 0, 0, 0}, {42030, 63, 21, 21, 0, 0, 0}}
 #endif
 
 #include "../protocol.h"
@@ -77,7 +77,11 @@ typedef enum LAWN_FAULT_CODE
    LAWN_FAULT_TILT=6, /*  | */
    LAWN_FAULT_INIT_FAILED=7, /*  | */
    LAWN_FAULT_OVERTEMP=8, /*  | */
-   LAWN_FAULT_CODE_ENUM_END=9, /*  | */
+   LAWN_FAULT_BOOTLOADER_REFUSED=9, /* A LAWN_ENTER_BOOTLOADER request was refused: wrong magic, or the machine
+        was armed. Reported with LAWN_FAULT_EVENT.latched = 0 - it is an event, not a machine
+        state, and nothing about it needs clearing. Exists so a refusal is distinguishable
+        from a lost frame. | */
+   LAWN_FAULT_CODE_ENUM_END=10, /*  | */
 } LAWN_FAULT_CODE;
 #endif
 
@@ -96,6 +100,7 @@ typedef enum LAWN_FAULT_CODE
 #include "./mavlink_msg_lawn_drive_cmd.h"
 #include "./mavlink_msg_lawn_arm_cmd.h"
 #include "./mavlink_msg_lawn_stop_req.h"
+#include "./mavlink_msg_lawn_enter_bootloader.h"
 #include "./mavlink_msg_lawn_nav_status.h"
 #include "./mavlink_msg_lawn_wheel_state.h"
 #include "./mavlink_msg_lawn_link_stats.h"
@@ -108,8 +113,8 @@ typedef enum LAWN_FAULT_CODE
 
 
 #if MAVLINK_LAWNTONOMY_XML_HASH == MAVLINK_PRIMARY_XML_HASH
-# define MAVLINK_MESSAGE_INFO {MAVLINK_MESSAGE_INFO_HEARTBEAT, MAVLINK_MESSAGE_INFO_LAWN_DRIVE_CMD, MAVLINK_MESSAGE_INFO_LAWN_ARM_CMD, MAVLINK_MESSAGE_INFO_LAWN_STOP_REQ, MAVLINK_MESSAGE_INFO_LAWN_NAV_STATUS, MAVLINK_MESSAGE_INFO_LAWN_WHEEL_STATE, MAVLINK_MESSAGE_INFO_LAWN_LINK_STATS, MAVLINK_MESSAGE_INFO_LAWN_FAULT_EVENT, MAVLINK_MESSAGE_INFO_LAWN_TIMESYNC, MAVLINK_MESSAGE_INFO_LAWN_IMU_RAW}
-# define MAVLINK_MESSAGE_NAMES {{ "HEARTBEAT", 0 }, { "LAWN_ARM_CMD", 42002 }, { "LAWN_DRIVE_CMD", 42001 }, { "LAWN_FAULT_EVENT", 42013 }, { "LAWN_IMU_RAW", 42030 }, { "LAWN_LINK_STATS", 42012 }, { "LAWN_NAV_STATUS", 42010 }, { "LAWN_STOP_REQ", 42003 }, { "LAWN_TIMESYNC", 42020 }, { "LAWN_WHEEL_STATE", 42011 }}
+# define MAVLINK_MESSAGE_INFO {MAVLINK_MESSAGE_INFO_HEARTBEAT, MAVLINK_MESSAGE_INFO_LAWN_DRIVE_CMD, MAVLINK_MESSAGE_INFO_LAWN_ARM_CMD, MAVLINK_MESSAGE_INFO_LAWN_STOP_REQ, MAVLINK_MESSAGE_INFO_LAWN_ENTER_BOOTLOADER, MAVLINK_MESSAGE_INFO_LAWN_NAV_STATUS, MAVLINK_MESSAGE_INFO_LAWN_WHEEL_STATE, MAVLINK_MESSAGE_INFO_LAWN_LINK_STATS, MAVLINK_MESSAGE_INFO_LAWN_FAULT_EVENT, MAVLINK_MESSAGE_INFO_LAWN_TIMESYNC, MAVLINK_MESSAGE_INFO_LAWN_IMU_RAW}
+# define MAVLINK_MESSAGE_NAMES {{ "HEARTBEAT", 0 }, { "LAWN_ARM_CMD", 42002 }, { "LAWN_DRIVE_CMD", 42001 }, { "LAWN_ENTER_BOOTLOADER", 42004 }, { "LAWN_FAULT_EVENT", 42013 }, { "LAWN_IMU_RAW", 42030 }, { "LAWN_LINK_STATS", 42012 }, { "LAWN_NAV_STATUS", 42010 }, { "LAWN_STOP_REQ", 42003 }, { "LAWN_TIMESYNC", 42020 }, { "LAWN_WHEEL_STATE", 42011 }}
 # if MAVLINK_COMMAND_24BIT
 #  include "../mavlink_get_info.h"
 # endif
