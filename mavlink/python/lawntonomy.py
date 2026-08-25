@@ -417,8 +417,16 @@ LAWN_FAULT_INIT_FAILED = 7
 enums["LAWN_FAULT_CODE"][7] = EnumEntry("LAWN_FAULT_INIT_FAILED", """""")
 LAWN_FAULT_OVERTEMP = 8
 enums["LAWN_FAULT_CODE"][8] = EnumEntry("LAWN_FAULT_OVERTEMP", """""")
-LAWN_FAULT_CODE_ENUM_END = 9
-enums["LAWN_FAULT_CODE"][9] = EnumEntry("LAWN_FAULT_CODE_ENUM_END", """""")
+LAWN_FAULT_BOOTLOADER_REFUSED = 9
+enums["LAWN_FAULT_CODE"][9] = EnumEntry(
+    "LAWN_FAULT_BOOTLOADER_REFUSED",
+    """A LAWN_ENTER_BOOTLOADER request was refused: wrong magic, or the machine
+        was armed. Reported with LAWN_FAULT_EVENT.latched = 0 - it is an event, not a machine
+        state, and nothing about it needs clearing. Exists so a refusal is distinguishable
+        from a lost frame.""",
+)
+LAWN_FAULT_CODE_ENUM_END = 10
+enums["LAWN_FAULT_CODE"][10] = EnumEntry("LAWN_FAULT_CODE_ENUM_END", """""")
 
 # MAV_AUTOPILOT
 enums["MAV_AUTOPILOT"] = Enum()
@@ -908,6 +916,7 @@ MAVLINK_MSG_ID_UNKNOWN = -2
 MAVLINK_MSG_ID_LAWN_DRIVE_CMD = 42001
 MAVLINK_MSG_ID_LAWN_ARM_CMD = 42002
 MAVLINK_MSG_ID_LAWN_STOP_REQ = 42003
+MAVLINK_MSG_ID_LAWN_ENTER_BOOTLOADER = 42004
 MAVLINK_MSG_ID_LAWN_NAV_STATUS = 42010
 MAVLINK_MSG_ID_LAWN_WHEEL_STATE = 42011
 MAVLINK_MSG_ID_LAWN_LINK_STATS = 42012
@@ -1037,6 +1046,53 @@ class MAVLink_lawn_stop_req_message(MAVLink_message):
 # Define name on the class for backwards compatibility (it is now msgname).
 # Done with setattr to hide the class variable from mypy.
 setattr(MAVLink_lawn_stop_req_message, "name", mavlink_msg_deprecated_name_property())
+
+
+class MAVLink_lawn_enter_bootloader_message(MAVLink_message):
+    """
+    Request a reboot into the RP2350 bootrom's BOOTSEL mode so the
+    low-level       tier can be reflashed without physical access to
+    the button. The reboot is unconditional       once taken, so it is
+    refused unless the magic matches AND the machine is disarmed:
+    rebooting while armed is an uncommanded state change even though
+    the pads come out of       reset with the motor bridge in its
+    coast row. A refusal is reported as a non-latching
+    LAWN_FAULT_EVENT with code LAWN_FAULT_BOOTLOADER_REFUSED.
+    Acceptance is NOT acknowledged       on this link - the
+    acknowledgement is the PICOBOOT USB device appearing.
+    """
+
+    id = MAVLINK_MSG_ID_LAWN_ENTER_BOOTLOADER
+    msgname = "LAWN_ENTER_BOOTLOADER"
+    fieldnames = ["magic"]
+    ordered_fieldnames = ["magic"]
+    fieldtypes = ["uint32_t"]
+    fielddisplays_by_name: Dict[str, str] = {}
+    fieldenums_by_name: Dict[str, str] = {}
+    fieldunits_by_name: Dict[str, str] = {}
+    native_format = bytearray(b"<I")
+    orders = [0]
+    lengths = [1]
+    array_lengths = [0]
+    crc_extra = 68
+    unpacker = struct.Struct("<I")
+    instance_field = None
+    instance_offset = -1
+
+    def __init__(self, magic: int):
+        MAVLink_message.__init__(self, MAVLink_lawn_enter_bootloader_message.id, MAVLink_lawn_enter_bootloader_message.msgname)
+        self._fieldnames = MAVLink_lawn_enter_bootloader_message.fieldnames
+        self._instance_field = MAVLink_lawn_enter_bootloader_message.instance_field
+        self._instance_offset = MAVLink_lawn_enter_bootloader_message.instance_offset
+        self.magic = magic
+
+    def pack(self, mav: "MAVLink", force_mavlink1: bool = False) -> bytes:
+        return self._pack(mav, self.crc_extra, self.unpacker.pack(self.magic), force_mavlink1=force_mavlink1)
+
+
+# Define name on the class for backwards compatibility (it is now msgname).
+# Done with setattr to hide the class variable from mypy.
+setattr(MAVLink_lawn_enter_bootloader_message, "name", mavlink_msg_deprecated_name_property())
 
 
 class MAVLink_lawn_nav_status_message(MAVLink_message):
@@ -1360,6 +1416,7 @@ mavlink_map: Dict[int, Type[MAVLink_message]] = {
     MAVLINK_MSG_ID_LAWN_DRIVE_CMD: MAVLink_lawn_drive_cmd_message,
     MAVLINK_MSG_ID_LAWN_ARM_CMD: MAVLink_lawn_arm_cmd_message,
     MAVLINK_MSG_ID_LAWN_STOP_REQ: MAVLink_lawn_stop_req_message,
+    MAVLINK_MSG_ID_LAWN_ENTER_BOOTLOADER: MAVLink_lawn_enter_bootloader_message,
     MAVLINK_MSG_ID_LAWN_NAV_STATUS: MAVLink_lawn_nav_status_message,
     MAVLINK_MSG_ID_LAWN_WHEEL_STATE: MAVLink_lawn_wheel_state_message,
     MAVLINK_MSG_ID_LAWN_LINK_STATS: MAVLink_lawn_link_stats_message,
@@ -1834,6 +1891,44 @@ class MAVLink(object):
 
         """
         self.send(self.lawn_stop_req_encode(reason), force_mavlink1=force_mavlink1)
+
+    def lawn_enter_bootloader_encode(self, magic: int) -> MAVLink_lawn_enter_bootloader_message:
+        """
+        Request a reboot into the RP2350 bootrom's BOOTSEL mode so the low-
+        level       tier can be reflashed without physical access to
+        the button. The reboot is unconditional       once taken, so
+        it is refused unless the magic matches AND the machine is
+        disarmed:       rebooting while armed is an uncommanded state
+        change even though the pads come out of       reset with the
+        motor bridge in its coast row. A refusal is reported as a non-
+        latching       LAWN_FAULT_EVENT with code
+        LAWN_FAULT_BOOTLOADER_REFUSED. Acceptance is NOT acknowledged
+        on this link - the acknowledgement is the PICOBOOT USB device
+        appearing.
+
+        magic                     : Must be 0xB00710AD; wider than and unrelated to LAWN_ARM_CMD.magic so neither can be mistaken for the other. (type:uint32_t)
+
+        """
+        return MAVLink_lawn_enter_bootloader_message(magic)
+
+    def lawn_enter_bootloader_send(self, magic: int, force_mavlink1: bool = False) -> None:
+        """
+        Request a reboot into the RP2350 bootrom's BOOTSEL mode so the low-
+        level       tier can be reflashed without physical access to
+        the button. The reboot is unconditional       once taken, so
+        it is refused unless the magic matches AND the machine is
+        disarmed:       rebooting while armed is an uncommanded state
+        change even though the pads come out of       reset with the
+        motor bridge in its coast row. A refusal is reported as a non-
+        latching       LAWN_FAULT_EVENT with code
+        LAWN_FAULT_BOOTLOADER_REFUSED. Acceptance is NOT acknowledged
+        on this link - the acknowledgement is the PICOBOOT USB device
+        appearing.
+
+        magic                     : Must be 0xB00710AD; wider than and unrelated to LAWN_ARM_CMD.magic so neither can be mistaken for the other. (type:uint32_t)
+
+        """
+        self.send(self.lawn_enter_bootloader_encode(magic), force_mavlink1=force_mavlink1)
 
     def lawn_nav_status_encode(self, t_meas_us: int, cmd_age_ms: int, nav_state: int, armed: int, fault: int) -> MAVLink_lawn_nav_status_message:
         """

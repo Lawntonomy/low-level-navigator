@@ -7,6 +7,7 @@
 #include "task.h"
 
 #include "app/board.h"
+#include "app/bootloader.hpp"
 #include "app/log.hpp"
 #include "app/safety.hpp"
 
@@ -203,6 +204,55 @@ void dispatch(const mavlink_message_t* m)
         log_console::write("[link] stop requested\r\n");
         break;
 
+    case MAVLINK_MSG_ID_LAWN_ENTER_BOOTLOADER:
+    {
+        mavlink_lawn_enter_bootloader_t b;
+        mavlink_msg_lawn_enter_bootloader_decode(m, &b);
+
+        const safety::Status st = safety::status();
+        const bootloader::Verdict v = bootloader::judge(b.magic, st.armed);
+
+        if (v == bootloader::Verdict::accept)
+        {
+            // Latch only. The reset is taken by the TX task once the ring has
+            // drained — see link.hpp's ownership rule and bootloader.hpp.
+            bootloader::request();
+            log_console::write("[link] bootloader request accepted\r\n");
+        }
+        else
+        {
+            // A refusal must reach the Pi, or it cannot tell "refused" from
+            // "command lost" — and this firmware's console has no listener
+            // attached in normal operation, so reporting it there only is the
+            // same as not reporting it.
+            //
+            // LAWN_FAULT_EVENT rather than a new channel: it is already the
+            // repo's asynchronous, event-shaped, Pi-visible report, it already
+            // carries `latched` so a non-latching event needs no new field, and
+            // giving the Pi a second place to look for "something was refused"
+            // is how one of them stops being read. The code is NOT added to
+            // safety::Fault, because that enum is the set of LATCHED faults and
+            // this must never become one.
+            //
+            // Which refusal it was is only on the console. The Pi can tell the
+            // two apart from context: it knows whether it is armed, at 20 Hz,
+            // from LAWN_NAV_STATUS.
+            //
+            // NOT rate-limited, and that is a deliberate trade rather than an
+            // oversight. A peer spamming bad-magic requests gets 23 bytes out
+            // per 16 bytes in, so it can crowd the TX ring and cost heartbeats.
+            // The alternative — suppressing repeats inside a window — can eat
+            // the one refusal the Pi was waiting for, which is the failure this
+            // report exists to prevent. A flood is already visible as
+            // dropped_tx in LAWN_LINK_STATS, and a peer able to saturate the
+            // inbound link is a larger problem than the amplification.
+            send_fault_event(LAWN_FAULT_BOOTLOADER_REFUSED, static_cast<uint8_t>(st.state), false);
+            log_console::write("[link] bootloader request REFUSED (%s)\r\n",
+                               v == bootloader::Verdict::armed ? "armed" : "bad magic");
+        }
+        break;
+    }
+
     case MAVLINK_MSG_ID_LAWN_TIMESYNC:
     {
         mavlink_lawn_timesync_t ts;
@@ -336,6 +386,25 @@ void service_tx()
         }
         taskEXIT_CRITICAL();
     }
+}
+
+bool tx_quiesce()
+{
+    taskENTER_CRITICAL();
+    const bool empty = (tx_used_unsafe() == 0);
+    taskEXIT_CRITICAL();
+
+    if (!empty)
+    {
+        return false;
+    }
+
+    // The ring being empty is not enough: up to a FIFO's worth of bytes plus
+    // the byte in the shift register are still being clocked out. At 1 Mbaud
+    // that is tens of microseconds, so this blocks only briefly — and it is
+    // only ever reached on a path that is about to stop executing anyway.
+    uart_tx_wait_blocking(board::cmd_uart());
+    return true;
 }
 
 bool send_heartbeat()

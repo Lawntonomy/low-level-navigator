@@ -30,68 +30,23 @@
 #include "pico/stdlib.h"
 
 #include "app/board.h"
+#include "app/bootloader.hpp"
 #include "app/link.hpp"
 #include "app/log.hpp"
+#include "app/motors.hpp"
 #include "app/rt.h"
 #include "app/safety.hpp"
 
 #include "hardware_drivers/encoder.hpp"
-#include "hardware_drivers/gpio_defines.h"
 
 namespace
 {
-
-// ---------------------------------------------------------------------------
-// Motor outputs
-//
-// One place where a number becomes motion, so the SAF-10 ordering rule is
-// visible rather than implied.
-// ---------------------------------------------------------------------------
-
-void motors_safe_state()
-{
-    // SAF-10: every output at a defined zero BEFORE drive enable is asserted.
-    //
-    // The PWM pins are included even though PIO PWM is not attached yet. When
-    // it is, this function is the whole stop mechanism, and PIO drives those
-    // pins autonomously — so zeroing duty has to happen here or the function
-    // whose entire job is "make the outputs safe" becomes a no-op for speed.
-    gpio_put(static_cast<uint>(gpio::pins::left_pwm_pin), 0);
-    gpio_put(static_cast<uint>(gpio::pins::right_pwm_pin), 0);
-
-    gpio_put(static_cast<uint>(gpio::pins::left_forward_pin), 0);
-    gpio_put(static_cast<uint>(gpio::pins::left_backward_pin), 0);
-    gpio_put(static_cast<uint>(gpio::pins::right_forward_pin), 0);
-    gpio_put(static_cast<uint>(gpio::pins::right_backward_pin), 0);
-
-    gpio_put(static_cast<uint>(gpio::pins::driver_enable_pin), 0);
-}
-
-void motors_init()
-{
-    const uint pins[] = {
-        static_cast<uint>(gpio::pins::driver_enable_pin),
-        static_cast<uint>(gpio::pins::left_pwm_pin),
-        static_cast<uint>(gpio::pins::right_pwm_pin),
-        static_cast<uint>(gpio::pins::left_forward_pin),
-        static_cast<uint>(gpio::pins::left_backward_pin),
-        static_cast<uint>(gpio::pins::right_forward_pin),
-        static_cast<uint>(gpio::pins::right_backward_pin),
-    };
-    for (uint p : pins)
-    {
-        gpio_init(p);
-        gpio_put(p, 0); // drive low before enabling the output driver
-        gpio_set_dir(p, GPIO_OUT);
-    }
-    motors_safe_state();
-}
 
 // Every path that gives up must remove drive first. SAF-13: drive enable comes
 // off before a fault is reported, not after.
 [[noreturn]] void halt(const char* why)
 {
-    motors_safe_state();
+    motors::safe_state();
 
     // Deliberate: with no hardware interlock, holding these pins driven low
     // forever is safer than letting the watchdog reset the chip every 100 ms
@@ -131,7 +86,7 @@ void motors_init()
         // applied identical by construction and hide the divergence the field
         // exists to expose — and a Phase 3 stop test would "pass" without ever
         // having commanded motion.
-        motors_safe_state();
+        motors::safe_state();
         safety::record_applied(0, 0);
         (void)d;
 
@@ -173,6 +128,29 @@ void motors_init()
     for (;;)
     {
         link::service_tx();
+
+        // A link-commanded BOOTSEL reboot is taken here and nowhere else.
+        //
+        // The RX path only latches the request (bootloader.hpp). It cannot take
+        // the reset itself for two reasons: rom_reset_usb_boot() does not
+        // return, so a frame half-way out of the shift register would be cut
+        // off and desynchronise the far end; and this task is the sole writer
+        // to the command UART, so it is the only one allowed to wait on it.
+        //
+        // Motors are safed on every pass while the request is outstanding, not
+        // once at the end, so drive is off from the first opportunity rather
+        // than after however many passes the ring takes to drain. safe_state()
+        // is idempotent. bootloader::enter() safes them again; that is
+        // deliberate belt and braces, not an oversight.
+        if (bootloader::pending())
+        {
+            motors::safe_state();
+            if (link::tx_quiesce())
+            {
+                bootloader::enter(); // does not return
+            }
+        }
+
         vTaskDelay(pdMS_TO_TICKS(rt::period_link_tx_ms));
     }
 }
@@ -260,7 +238,7 @@ void must_create(TaskFunction_t fn, const char* name, configSTACK_DEPTH_TYPE sta
 
 extern "C" void vApplicationStackOverflowHook(TaskHandle_t, char* name)
 {
-    motors_safe_state();
+    motors::safe_state();
     log_console::write_blocking("[FATAL] stack overflow in task: ");
     log_console::write_blocking(name ? name : "?");
     halt("\r\n");
@@ -273,11 +251,11 @@ extern "C" void vApplicationMallocFailedHook()
 
 int main()
 {
-    // Before anything that could move, and before the console: motors_init()
+    // Before anything that could move, and before the console: motors::init()
     // needs no logging, and doing it first shortens the window in which
     // driver_enable_pin sits in its undriven reset state by the time it takes
     // to clock out the boot banner.
-    motors_init();
+    motors::init();
 
     log_console::init();
     log_console::write_blocking("\r\n\r\n[boot] low-level navigator\r\n");
