@@ -304,8 +304,10 @@ TEST(PidClass, ResetClearsIntegralAndDerivativeHistory)
 
     PidClass fresh = make_pid(1.0f, 5.0f, 3.0f, /*max=*/1000.0f, /*min=*/-1000.0f);
 
-    // A reset controller must be indistinguishable from a new one: no residual
-    // integral, and no derivative history to differentiate against.
+    // On STATE, a reset controller must be indistinguishable from an
+    // identically configured new one: no residual integral, and no derivative
+    // history to differentiate against. (Configuration is a separate matter --
+    // see ResetPreservesConfigurationAndClearsOnlyState.)
     EXPECT_FLOAT_EQ(pid.control_loop(0.0f, 0.0f, kDt), fresh.control_loop(0.0f, 0.0f, kDt));
     EXPECT_FLOAT_EQ(pid.control_loop(0.0f, 0.0f, kDt), 0.0f);
     EXPECT_FALSE(pid.saturated());
@@ -342,6 +344,103 @@ TEST(PidClass, AntiWindupHonoursAppliedValue)
         held.note_applied(50.0f); // slew limiter or PWM clamp sitting at max
         EXPECT_FLOAT_EQ(held.control_loop(0.0f, 1.0f, kDt), 0.0f);
     }
+}
+
+// SAF-32, second instance -- found in the fix for the first.
+//
+// `applied_` starts at 0.0f and nothing in this firmware calls note_applied()
+// yet. With a range that straddles zero the applied_ clauses are inert and the
+// behaviour is correct, which is why every earlier test missed this. But a
+// caller gating direction writes set_output_limits(0.0f, +N) -- the pattern
+// src/low-level-navigator.cpp uses, and the natural way to express SAF-30 with
+// this API -- and then `applied_ <= min_output_` is 0 <= 0, permanently true.
+// Every cycle with a negative error has its integration blocked, so the
+// integral is monotonically non-decreasing: it ratchets up to the step 7 bound
+// of max/ki and the integral term alone is then full scale, with no measured
+// over-speed able to remove it.
+//
+// The fix is that the applied_ clauses are OPT-IN: they apply only on a cycle
+// preceded by note_applied(). An uncalled note_applied() degrades to pure
+// clamp-based conditional integration -- the same correct behaviour the
+// straddling case already had -- instead of silently asserting that the
+// downstream stage is pinned.
+TEST(PidClass, ForwardOnlyRangeDoesNotLatchTheIntegral)
+{
+    // kp = kd = 0, so the output IS the integral term and nothing else can
+    // mask the latch. Forward-only gate: [0, 1000].
+    PidClass pid = make_pid(0.0f, 100.0f, 0.0f, /*max=*/1000.0f, /*min=*/0.0f);
+
+    // Wind the integral up legitimately. Nothing saturates: 20 cycles of
+    // e = +10 at dt = 0.005 leave the integral at 1.0, a 100-count term
+    // against a 1000-count ceiling.
+    float last = 0.0f;
+    for (int i = 0; i < 20; ++i)
+    {
+        last = pid.control_loop(0.0f, 10.0f, kDt);
+    }
+    ASSERT_GT(last, 0.0f);
+
+    // Now the wheel overshoots: measurement 20 against a setpoint of 10, so
+    // e = -10 sustained. The integral must unwind and the command must come
+    // back to zero. Latched, it sits at 100 forever -- a wheel commanded to
+    // stop that never does.
+    last = pid.control_loop(20.0f, 10.0f, kDt);
+    ASSERT_GT(last, 0.0f);
+    for (int i = 1; i < 25; ++i)
+    {
+        const float out = pid.control_loop(20.0f, 10.0f, kDt);
+        ASSERT_LE(out, last) << "command rose on cycle " << i;
+        last = out;
+    }
+    EXPECT_NEAR(last, 0.0f, 1e-3f);
+}
+
+// The mirror case: max_output_ == 0 makes `applied_ >= max_output_` permanently
+// true, so it is positive-going integration that is blocked and the latch holds
+// in reverse.
+TEST(PidClass, ReverseOnlyRangeDoesNotLatchTheIntegral)
+{
+    PidClass pid = make_pid(0.0f, 100.0f, 0.0f, /*max=*/0.0f, /*min=*/-1000.0f);
+
+    float last = 0.0f;
+    for (int i = 0; i < 20; ++i)
+    {
+        last = pid.control_loop(10.0f, 0.0f, kDt); // e = -10
+    }
+    ASSERT_LT(last, 0.0f);
+
+    last = pid.control_loop(0.0f, 10.0f, kDt); // e = +10
+    ASSERT_LT(last, 0.0f);
+    for (int i = 1; i < 25; ++i)
+    {
+        const float out = pid.control_loop(0.0f, 10.0f, kDt);
+        ASSERT_GE(out, last) << "command fell on cycle " << i;
+        last = out;
+    }
+    EXPECT_NEAR(last, 0.0f, 1e-3f);
+}
+
+// The report is good for one cycle and one only. If it persisted, a single
+// note_applied() at a rail would block integration in that direction for the
+// rest of the controller's life -- the same latch by a slower route.
+TEST(PidClass, AppliedValueExpiresAfterOneCycle)
+{
+    PidClass pid = make_pid(0.0f, 100.0f, 0.0f, /*max=*/50.0f, /*min=*/-50.0f);
+
+    // One cycle with the downstream stage pinned at the ceiling: blocked.
+    pid.note_applied(50.0f);
+    EXPECT_FLOAT_EQ(pid.control_loop(0.0f, 1.0f, kDt), 0.0f);
+
+    // Nothing reports anything after that, so the controller must go back to
+    // judging by its own clamp -- which is not firing -- and integrate.
+    float out = 0.0f;
+    for (int i = 0; i < 5; ++i)
+    {
+        out = pid.control_loop(0.0f, 1.0f, kDt);
+    }
+    EXPECT_GT(out, 0.0f);
+    // Four cycles of e = 1 at dt = 0.005 accumulated before the fifth returned.
+    EXPECT_NEAR(out, 2.0f, 1e-3f);
 }
 
 // Step 7 -- bounding the integral to [min/ki, max/ki] -- is only separable from
@@ -443,9 +542,53 @@ TEST(PidClass, NonFiniteMeasurementOrSetpointReturnsZeroAndLeavesStateUntouched)
     EXPECT_FLOAT_EQ(pid.control_loop(21.0f, 50.0f, kDt), twin.control_loop(21.0f, 50.0f, kDt));
 }
 
+// The zero returned above is a deliberate exception to the range invariant.
+// Zero is the safe actuator command whatever range is configured; clamping into
+// a range whose minimum is positive would answer an unusable measurement by
+// carrying on driving. Documented in pid.hpp, pinned here.
+TEST(PidClass, NonFiniteInputReturnsZeroEvenWhenZeroIsOutsideTheRange)
+{
+    PidClass pid = make_pid(1.0f, 0.0f, 0.0f, /*max=*/1000.0f, /*min=*/100.0f);
+
+    ASSERT_FLOAT_EQ(pid.control_loop(0.0f, 500.0f, kDt), 500.0f);
+
+    const float not_a_number = std::numeric_limits<float>::quiet_NaN();
+    const float out = pid.control_loop(not_a_number, 500.0f, kDt);
+
+    EXPECT_FLOAT_EQ(out, 0.0f);
+    EXPECT_LT(out, pid.get_min_output()) << "the range exception is the point of this test";
+}
+
 // --------------------------------------------------------------------------
-// reset() must be total.
+// reset() clears state; it does not touch configuration.
 // --------------------------------------------------------------------------
+
+// pid.hpp used to claim a reset controller was "indistinguishable from a
+// freshly constructed one". It is not, and should not be: a fresh controller
+// carries the default limits of [-1, 1], while reset() leaves whatever range
+// was configured in place. Restoring the limits would silently discard the
+// caller's configuration, which is the worse of the two surprises. reset()
+// clears STATE and preserves CONFIGURATION; this pins that.
+TEST(PidClass, ResetPreservesConfigurationAndClearsOnlyState)
+{
+    PidClass pid = make_pid(1.0f, 0.0f, 0.0f, /*max=*/250.0f, /*min=*/-75.0f);
+    pid.control_loop(0.0f, 10.0f, kDt);
+
+    pid.reset();
+
+    EXPECT_FLOAT_EQ(pid.get_max_output(), 250.0f);
+    EXPECT_FLOAT_EQ(pid.get_min_output(), -75.0f);
+    EXPECT_TRUE(pid.gains_valid());
+
+    // A freshly constructed one is a different controller: default limits, so
+    // the same error gives a different command.
+    PidClass fresh(1.0f, 0.0f, 0.0f);
+    EXPECT_FLOAT_EQ(fresh.get_max_output(), 1.0f);
+    EXPECT_FLOAT_EQ(fresh.get_min_output(), -1.0f);
+
+    EXPECT_FLOAT_EQ(pid.control_loop(0.0f, 10.0f, kDt), 10.0f);
+    EXPECT_FLOAT_EQ(fresh.control_loop(0.0f, 10.0f, kDt), 1.0f);
+}
 
 TEST(PidClass, ResetClearsTheAppliedValue)
 {
@@ -462,10 +605,12 @@ TEST(PidClass, ResetClearsTheAppliedValue)
     pid.reset();
 
     // A reset taken in that state must clear the controller's belief about what
-    // was last applied too. Left stale at 50, it goes on blocking positive
-    // integration until the next note_applied() -- a reset that does not fully
-    // reset. Nothing calls note_applied() below, so a reset controller and a
-    // fresh one must track each other exactly.
+    // was last applied too. The per-cycle expiry of the report now makes that
+    // structural -- the value cannot outlive the cycle it was noted for -- and
+    // reset() clearing it covers the remaining gap, a reset falling between
+    // note_applied() and the control_loop() that would have consumed it.
+    // Nothing calls note_applied() below, so a reset controller and an
+    // identically configured fresh one must track each other exactly.
     PidClass fresh = make_pid(0.0f, 100.0f, 0.0f, /*max=*/50.0f, /*min=*/-50.0f);
     for (int i = 0; i < 5; ++i)
     {
@@ -476,27 +621,95 @@ TEST(PidClass, ResetClearsTheAppliedValue)
     EXPECT_GT(pid.control_loop(0.0f, 1.0f, kDt), 0.0f);
 }
 
-// A negative ki inverts [min/ki, max/ki], which is the same lo > hi case that
-// set_output_limits rejects for the limits themselves -- undefined behaviour in
-// std::clamp. Gains are not validated here (whether they should be is a
-// separate decision), so the bound is ordered explicitly instead. This asserts
-// the resulting defined behaviour: the integral term saturates and STAYS there.
-// Unordered, the bound alternates between the two rails and the command
-// oscillates full-scale, which on a motor is considerably worse than wrong.
-TEST(PidClass, NegativeKiDoesNotInvertTheIntegralBound)
+// --------------------------------------------------------------------------
+// Gain validation. A negative gain inverts the sign of the feedback; a
+// non-finite one poisons every term it touches. Both are coerced to zero,
+// which is inert, and gains_valid() reports the coercion.
+//
+// This replaces an earlier NegativeKiDoesNotInvertTheIntegralBound, which
+// asserted that ki = -100 against a POSITIVE error held the output at the
+// MINIMUM for ten consecutive cycles -- i.e. it enshrined issue #13's headline
+// symptom (sustained full reverse in answer to "accelerate forward") as a
+// passing regression guard. The ordered std::min/std::max bound in step 7 is
+// kept as defence in depth, but a negative ki can no longer reach it, so
+// nothing here can exercise the ordering directly any more.
+// --------------------------------------------------------------------------
+
+TEST(PidClass, NegativeGainsAreCoercedToZero)
 {
-    PidClass pid = make_pid(0.0f, -100.0f, 0.0f, /*max=*/50.0f, /*min=*/-50.0f);
-
-    for (int i = 0; i < 20; ++i)
-    {
-        pid.control_loop(0.0f, 10.0f, kDt);
-    }
-
-    // integral pinned at max/|ki| = 0.5, so the term sits at -50 and holds.
+    // Negative kp: error +10 would give -20, i.e. reverse in answer to a
+    // request to accelerate forward, sustained for as long as the error lasts.
+    PidClass negative_kp = make_pid(-2.0f, 0.0f, 0.0f, /*max=*/50.0f, /*min=*/-50.0f);
+    EXPECT_FALSE(negative_kp.gains_valid());
     for (int i = 0; i < 10; ++i)
     {
-        ASSERT_FLOAT_EQ(pid.control_loop(0.0f, 10.0f, kDt), -50.0f) << "cycle " << i;
+        ASSERT_FLOAT_EQ(negative_kp.control_loop(0.0f, 10.0f, kDt), 0.0f) << "cycle " << i;
     }
+
+    // Negative ki: the integral term marches away from the error rather than
+    // toward it, and ends pinned at the wrong rail.
+    PidClass negative_ki = make_pid(0.0f, -100.0f, 0.0f, /*max=*/50.0f, /*min=*/-50.0f);
+    EXPECT_FALSE(negative_ki.gains_valid());
+    for (int i = 0; i < 30; ++i)
+    {
+        ASSERT_FLOAT_EQ(negative_ki.control_loop(0.0f, 10.0f, kDt), 0.0f) << "cycle " << i;
+    }
+
+    // Negative kd: the derivative term reinforces the measurement change it is
+    // supposed to damp.
+    PidClass negative_kd = make_pid(0.0f, 0.0f, -2.0f, /*max=*/50.0f, /*min=*/-50.0f);
+    EXPECT_FALSE(negative_kd.gains_valid());
+    ASSERT_FLOAT_EQ(negative_kd.control_loop(0.0f, 0.0f, kDt), 0.0f);
+    EXPECT_FLOAT_EQ(negative_kd.control_loop(1.0f, 0.0f, kDt), 0.0f);
+}
+
+TEST(PidClass, NonFiniteGainsAreCoercedToZero)
+{
+    const float not_a_number = std::numeric_limits<float>::quiet_NaN();
+    const float infinite = std::numeric_limits<float>::infinity();
+
+    // An infinite kp makes every non-zero error saturate instantly; a NaN one
+    // makes the output NaN, which the output clamp does not catch.
+    PidClass infinite_kp = make_pid(infinite, 0.0f, 0.0f, /*max=*/50.0f, /*min=*/-50.0f);
+    EXPECT_FALSE(infinite_kp.gains_valid());
+    EXPECT_FLOAT_EQ(infinite_kp.control_loop(0.0f, 10.0f, kDt), 0.0f);
+
+    PidClass nan_ki = make_pid(0.0f, not_a_number, 0.0f, /*max=*/50.0f, /*min=*/-50.0f);
+    EXPECT_FALSE(nan_ki.gains_valid());
+    for (int i = 0; i < 10; ++i)
+    {
+        const float out = nan_ki.control_loop(0.0f, 10.0f, kDt);
+        ASSERT_TRUE(std::isfinite(out)) << "cycle " << i;
+        ASSERT_FLOAT_EQ(out, 0.0f) << "cycle " << i;
+    }
+
+    // Only the offending gain is coerced. The rest of the controller keeps
+    // working: this one is left as pure proportional.
+    PidClass nan_kd = make_pid(1.0f, 0.0f, not_a_number, /*max=*/50.0f, /*min=*/-50.0f);
+    EXPECT_FALSE(nan_kd.gains_valid());
+    ASSERT_FLOAT_EQ(nan_kd.control_loop(0.0f, 0.0f, kDt), 0.0f);
+    // measurement 0 -> 1 with the setpoint at 0: kp * error = -1, and the
+    // coerced kd contributes nothing rather than a NaN.
+    const float proportional_only = nan_kd.control_loop(1.0f, 0.0f, kDt);
+    EXPECT_TRUE(std::isfinite(proportional_only));
+    EXPECT_FLOAT_EQ(proportional_only, -1.0f);
+}
+
+// Zero is a setting, not a missing value: ki = kd = 0 is the live
+// configuration and kp = 0 is how the windup tests isolate the integral.
+// Coercing or flagging it would make gains_valid() false for every controller
+// this firmware actually runs.
+TEST(PidClass, ZeroGainsAreValid)
+{
+    PidClass live = make_pid(2.0f, 0.0f, 0.0f);
+    EXPECT_TRUE(live.gains_valid());
+    EXPECT_FLOAT_EQ(live.control_loop(0.0f, 10.0f, kDt), 20.0f);
+
+    PidClass all_zero(0.0f, 0.0f, 0.0f);
+    EXPECT_TRUE(all_zero.gains_valid());
+
+    PidClass all_positive = make_pid(1.0f, 2.0f, 3.0f, /*max=*/1000.0f, /*min=*/-1000.0f);
+    EXPECT_TRUE(all_positive.gains_valid());
 }
 
 TEST(PidClass, ZeroKiDoesNotDivideByZero)
