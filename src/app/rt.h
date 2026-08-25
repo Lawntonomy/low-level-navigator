@@ -110,22 +110,50 @@ constexpr TickType_t period_link_tx_ms = 1;
 // (datasheet Table 535, printed p.505). The pad is then disconnected outright
 // rather than merely idled: IO_BANK0 FUNCSEL resets to 0x1f = NULL (printed
 // p.610) and PADS_BANK0 resets to IE=0, PDE=1 (printed p.787) - no peripheral
-// muxed, input buffer off, weak pull-down on. So system-overview.md's "a
-// halted RP2350 leaves the last duty cycle running indefinitely" is wrong for
-// the watchdog case. Erratum RP2350-E9 also does not apply here, because its
-// precondition is IE=1 and this reset clears IE.
+// muxed, input buffer off, and a 36-113 kΩ pull-down on (§14.9.4, printed
+// p.1340) - weak, and quantified here because how weak turns out to matter.
+// So system-overview.md's "a halted RP2350 leaves the last duty cycle running
+// indefinitely" is wrong for the watchdog case. Erratum RP2350-E9 also does
+// not apply here, because its precondition is IE=1 and this reset clears IE.
 //
 // It still does NOT close SAF-12:
 //   - a watchdog measures "did some code call feed", not "is the output
 //     right", so a live-but-wrong task satisfies it forever;
 //   - it shares die, rail and clock tree with what it supervises;
 //   - pause_on_debug stops the counter under a debugger;
-//   - the pull-down is weak, not a driver - whether the motor driver's enable
-//     input actually reads low is an analog question about that part;
+//   - that pull-down does not win at the pad where it matters: the motor
+//     driver reads its enable HIGH while nothing drives it (see below);
 //   - no datasheet figure exists for reset-to-pads-quiet latency.
 // An interlock independent of the RP2350 remains required. Bench measurement
-// that would settle the last two: scope GPIO 2/3/6 AT THE DRIVER IC while
-// forcing a watchdog timeout.
+// that would settle the last item, and confirm the divider below: scope
+// GPIO 2/3/6 AT THE DRIVER IC while forcing a watchdog timeout.
+//
+// The undriven-enable case is no longer an open question; it has been worked
+// and the answer is the unfavourable one. The motor driver is an Adafruit
+// TB6612 breakout (product 2448, Toshiba TB6612FNG) and GPIO 2 is its
+// active-high STBY input. Adafruit fit R1, a 10 kΩ pull-up from STBY to VCC,
+// the only resistor added anywhere on that board (their published EAGLE
+// schematic, part R1). Against it stand the TB6612's 200 kΩ internal
+// pull-down on every control pin (datasheet Pin Functions) and the RP2350 pad
+// pull-down above. Both pull-downs in parallel against the 10 kΩ give STBY =
+// 2.49 V at RPD = 36 kΩ and 2.90 V at 113 kΩ for VCC = 3.3 V, and 3.77 V at
+// 36 kΩ for VCC = 5.0 V, against V_IH(min) = 0.7·VCC. Every corner reads
+// HIGH, worst-case margin +0.18 V.
+//
+// So the driver is enabled from the moment VCC rises until firmware drives
+// GPIO 2 low, and a watchdog reset reopens that gate rather than closing it.
+// SAF-10 is violated by the hardware, not by the ordering in motors_init().
+//
+// It does not follow that the machine drives in that window: IN1/IN2/PWM are
+// held low by the same two pull-downs, and IN1=IN2=L is the coast row of the
+// TB6612 truth table. What is lost is the second gate — the enable is open
+// with nothing behind it, which is exactly the defence in depth SAF-10 exists
+// to provide.
+//
+// The fix is a board modification, not a firmware change: remove R1, or fit an
+// external pull-down ≤ 4.3 kΩ (≈2.2 kΩ is the sensible pick, since 4.3 kΩ
+// lands at 0.98 V against a 0.99 V threshold). Firmware cannot close this.
+// Full analysis: ADR-0010, as SAF-19.
 // ---------------------------------------------------------------------------
 
 constexpr uint32_t watchdog_timeout_ms = 100;
