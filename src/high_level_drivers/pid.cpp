@@ -82,9 +82,14 @@ float PidClass::control_loop(float measurement, float setpoint, float dt)
     //
     // Consumed before the guards below, so a report noted for a cycle that then
     // rejected its samples cannot speak for a later one. That is the one piece
-    // of state the non-finite path touches, and it is the fail-safe direction:
-    // dropping the report can only make the controller integrate MORE readily,
-    // never assert a block it has no evidence for.
+    // of state the non-finite path touches, and the reason is the expiry
+    // contract rather than any safety margin: a report is good for exactly one
+    // cycle, which is a simpler invariant to audit than "persists until
+    // superseded". Note that dropping a report is NOT inherently the safe
+    // direction -- it makes the controller integrate more readily, which is the
+    // windup direction. It is acceptable here because the intended call pattern
+    // issues note_applied() after every control_loop(), so the report is
+    // refreshed each cycle regardless.
     const bool have_applied = have_applied_;
     have_applied_ = false;
 
