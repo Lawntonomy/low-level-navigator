@@ -9,3 +9,6 @@ build-test
 # docs/rp2350-datasheet-index.md is committed and records the revision it was
 # generated from; regenerate with scripts/gen-datasheet-index.py.
 docs/*.pdf
+
+# pymavlink generator venv (see generate-mavlink.sh)
+.venv/
