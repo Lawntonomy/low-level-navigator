@@ -1,11 +1,13 @@
 #include "app/bootloader.hpp"
 
+#include "boot/picoboot_constants.h"
 #include "hardware/structs/watchdog.h"
 #include "hardware/watchdog.h"
 #include "pico/bootrom.h"
 
 #include "app/log.hpp"
 #include "app/motors.hpp"
+#include "app/safety.hpp"
 
 namespace bootloader
 {
@@ -38,8 +40,28 @@ bool pending()
     return requested;
 }
 
+void clear()
+{
+    requested = false;
+}
+
 void enter()
 {
+    // Re-check the interlock in the state that is actually being acted on.
+    //
+    // The gate ran when the request was latched, on a different task, before
+    // the ring drained. Accepting the request disarms (link.cpp), but a
+    // LAWN_ARM_CMD in the same receive batch can re-arm in between — so the
+    // condition is checked again here, where the consequence happens. If the
+    // machine armed in the interim, abandon: clear the latch and let the
+    // control loop carry on. The Pi sees no reboot and can ask again.
+    if (safety::status().armed)
+    {
+        clear();
+        log_console::write_blocking("[boot] BOOTSEL abandoned: re-armed after request\r\n");
+        return;
+    }
+
     // Drive off first and explicitly, before anything that reboots.
     motors::safe_state();
 
@@ -71,11 +93,31 @@ void enter_if_requested()
     // as a normal application rather than looping back here forever.
     watchdog_hw->scratch[scratch_index] = 0;
 
-    rom_reset_usb_boot(0, interface_mask);
+    // Call the bootrom API directly rather than through rom_reset_usb_boot(),
+    // which is declared noreturn and followed by __builtin_unreachable(). The
+    // ROM's own contract is narrower than that: datasheet §5.4.8.24 (printed
+    // 397) says NO_RETURN_ON_SUCCESS "forces this method not to return **if**
+    // the reboot is successfully initiated" -- on a failure it returns a
+    // negative error code (§5.4.3, printed 378).
+    //
+    // Through the noreturn wrapper the compiler deletes everything after the
+    // call, so an error return executes the literal pool: verified in the
+    // disassembly, where the only `pop {r3, pc}` is the magic-mismatch path.
+    // That is a hard fault with motors::init() not yet run and the TB6612
+    // enabled by the breakout's STBY pull-up (issue #26) -- the worst available
+    // outcome, reached by the one path that is supposed to be recoverable.
+    //
+    // Called here rather than where the request arrives because the ROM call
+    // hangs from a FreeRTOS task and works from a bare context (measured; the
+    // datasheet documents no calling-context restriction either way, so this is
+    // a bench fact to design around rather than a citable rule).
+    const int rc = rom_reboot(REBOOT2_FLAG_REBOOT_TYPE_BOOTSEL | REBOOT2_FLAG_NO_RETURN_ON_SUCCESS,
+                              reboot_delay_ms, interface_mask, 0);
 
-    // Only reached if the ROM refused. Fall through and boot normally: the
-    // request is already cleared, the machine comes up safe, and the Pi sees
-    // the link return instead of silence it cannot tell from dead hardware.
+    // Reached only on refusal. The magic is already cleared, so this returns
+    // into a normal boot: the machine comes up safe and the Pi sees the link
+    // return, rather than silence it cannot tell from dead hardware.
+    (void)rc;
 }
 
 } // namespace bootloader

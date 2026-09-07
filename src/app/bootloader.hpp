@@ -33,10 +33,8 @@ namespace bootloader
 // neither value can be read as the other, whatever field it lands in.
 inline constexpr uint32_t request_magic = 0xB00710ADu;
 
-// Passed to rom_reset_usb_boot()'s disable_interface_mask: 1 = disable USB
-// Mass Storage, keep PICOBOOT. picotool speaks PICOBOOT, and suppressing mass
-// storage stops a spurious drive appearing on the Pi every time we reflash.
-// 0 = expose both USB interfaces, matching pico-examples/flash/nuke/nuke.c.
+// The bootrom reboot's BOOTSEL flags. 0 = expose both USB interfaces, matching
+// pico-examples/flash/nuke/nuke.c.
 //
 // NOT 1 (BOOTSEL_FLAG_DISABLE_MSD_INTERFACE), which reads tidier: it would
 // suppress the mass-storage drive and keep only PICOBOOT, the interface
@@ -45,6 +43,11 @@ inline constexpr uint32_t request_magic = 0xB00710ADu;
 // Every working example passes 0. A spurious drive appearing on the Pi is
 // cosmetic; not working is not.
 inline constexpr uint32_t interface_mask = 0u;
+
+// Passed as rom_reboot()'s delay_ms. Matches what the SDK's own
+// rom_reset_usb_boot() wrapper uses, and is the only value this has been
+// exercised with on hardware.
+inline constexpr uint32_t reboot_delay_ms = 10;
 
 enum class Verdict : uint8_t
 {
@@ -101,6 +104,15 @@ inline constexpr unsigned scratch_index = 3;
 void enter_if_requested();
 
 void request();
+
+// Abandons a latched request.
+//
+// The latch is otherwise deliberately one-way, so this exists for exactly one
+// caller: enter(), on finding the machine re-armed between the request being
+// accepted and the reset being taken. Abandoning is the safe answer there --
+// the Pi can ask again, whereas rebooting a machine that is now armed is the
+// uncommanded state change the gate exists to prevent.
+void clear();
 
 // True once a request has been latched. Called from the link TX task. There is
 // no way to un-latch: a reboot request that has been accepted is not something
