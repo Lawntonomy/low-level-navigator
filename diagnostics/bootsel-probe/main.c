@@ -68,7 +68,8 @@ int main(void)
 
     for (int i = 10; i > 0; i--)
     {
-        printf("[bootsel-probe] alive, calling rom_reset_usb_boot(0, %u) in %d s\n", INTERFACE_MASK, i);
+        printf("[bootsel-probe] alive, calling rom_reset_usb_boot(0, %u) in %d s\n", INTERFACE_MASK,
+               i);
         sleep_ms(1000);
     }
 
