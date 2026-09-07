@@ -72,6 +72,16 @@ constexpr UBaseType_t prio_telemetry = 8;
 // and is the first thing that should starve.
 constexpr UBaseType_t prio_logger = 3;
 
+// The USB verbose log (ADR-0003's Bulk channel), one above idle and BELOW every
+// application task on purpose. It is the only caller of printf in the firmware,
+// and printf on USB CDC can block for up to 500 ms
+// (PICO_STDIO_USB_STDOUT_TIMEOUT_US) plus 1000 ms waiting on the stdio mutex
+// (PICO_STDIO_DEADLOCK_TIMEOUT_MS) when a host opens the port and stops reading.
+// That is only survivable because nothing waits on this task and it feeds no
+// watchdog. It should be the first thing to starve; raising it reintroduces the
+// hazard TP-0001 D5 disabled USB stdio to avoid.
+constexpr UBaseType_t prio_log_usb = 1;
+
 // ---------------------------------------------------------------------------
 // Stacks, in words. configCHECK_FOR_STACK_OVERFLOW=2 catches an underestimate
 // at runtime; telemetry reports high-water marks so these become measured
@@ -83,6 +93,7 @@ constexpr configSTACK_DEPTH_TYPE stack_link_rx = 1024;   // mavlink_message_t ~3
 constexpr configSTACK_DEPTH_TYPE stack_link_tx = 512;    // holds one byte + a frame
 constexpr configSTACK_DEPTH_TYPE stack_telemetry = 1024; // packs messages on stack
 constexpr configSTACK_DEPTH_TYPE stack_logger = 512;     // drain() holds one byte
+constexpr configSTACK_DEPTH_TYPE stack_log_usb = 512;    // batches out of the ring
 
 // ---------------------------------------------------------------------------
 // Periods

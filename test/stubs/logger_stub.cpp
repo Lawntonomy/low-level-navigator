@@ -51,7 +51,7 @@ LLN_DEFINE_LOG_LEVEL(error, 5)
 
 #undef LLN_DEFINE_LOG_LEVEL
 
-void Log::start()
+void Log::start(unsigned /*priority*/, unsigned /*stack_words*/)
 {
 }
 
