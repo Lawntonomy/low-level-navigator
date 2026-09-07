@@ -214,10 +214,26 @@ void dispatch(const mavlink_message_t* m)
 
         if (v == bootloader::Verdict::accept)
         {
+            // DISARM as part of accepting, before latching the request.
+            //
+            // Checking `armed` here and rebooting later is a time-of-check to
+            // time-of-use gap, and it is not a narrow one by construction:
+            // rx_poll() drains the whole UART FIFO in a single pass, so a
+            // LAWN_ARM_CMD arriving in the same batch is dispatched microseconds
+            // after this, and the reset is not taken until the TX task has
+            // drained the ring — a wait tx_quiesce() is explicitly allowed to
+            // retry. The stated invariant is "refused unless disarmed"; without
+            // this the code only delivers "was disarmed a moment ago".
+            //
+            // Disarming makes the precondition unfalsifiable rather than merely
+            // observed: a later LAWN_ARM_CMD can still re-arm, which is why
+            // enter() re-checks and abandons. Either half alone leaves the hole.
+            safety::on_stop_request();
+
             // Latch only. The reset is taken by the TX task once the ring has
             // drained — see link.hpp's ownership rule and bootloader.hpp.
             bootloader::request();
-            log_console::write("[link] bootloader request accepted\r\n");
+            log_console::write("[link] bootloader request accepted; disarmed\r\n");
         }
         else
         {
