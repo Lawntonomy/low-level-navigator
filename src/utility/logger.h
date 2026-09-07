@@ -159,7 +159,16 @@ class Log
     // call trace/info/warn/debug/error before this: they only need the ring,
     // which exists independently of the task, so nothing logged before
     // start() is lost unless the ring fills first.
-    static void start();
+    // Creates the task that drains the ring to USB CDC. Must be called once,
+    // after the console is up and before the scheduler starts.
+    //
+    // Takes its task parameters rather than reading them, because this header
+    // is compiled into the host tests and must stay free of the Pico SDK and
+    // FreeRTOS. src/app/rt.h owns the priority and stack table for every task
+    // in the firmware, with the rationale beside each; main() passes the
+    // entries from there so this one is not the exception that lives somewhere
+    // else. Plain types for the same reason.
+    static void start(unsigned priority, unsigned stack_words);
 
     // Messages dropped because the ring was full, since boot. Not yet wired
     // to telemetry (that would touch src/app/link.cpp, out of scope here);

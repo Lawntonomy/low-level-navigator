@@ -134,19 +134,21 @@ void Log::logger_task(void* /*pvParameters*/)
     }
 }
 
-void Log::start()
+void Log::start(unsigned priority, unsigned stack_words)
 {
-    // Priority 1: one above idle, intentionally lower than any application
-    // task. This mirrors rt::prio_logger's rationale in src/app/rt.h --
-    // logging is diagnostic, never required for safe operation (ADR-0003),
-    // and should be the first thing that starves -- but is defined locally
-    // rather than by including rt.h, which lives in src/app/ and is out of
-    // scope for this change. Worth consolidating into rt.h later.
-    constexpr UBaseType_t logger_task_priority = 1;
-    constexpr configSTACK_DEPTH_TYPE logger_task_stack = 512;
-
-    xTaskCreate(logger_task, "log_usb", logger_task_stack, NULL, logger_task_priority,
-                &loggerTaskHandle);
+    // Parameters come from rt.h via main(), so the whole firmware's task
+    // priorities and stacks stay in one table. See logger.h for why this
+    // header cannot include rt.h itself.
+    //
+    // The value that matters is the priority: this task is the ONLY caller of
+    // printf in the firmware, and printf on USB can block for up to 500 ms
+    // (PICO_STDIO_USB_STDOUT_TIMEOUT_US) plus 1000 ms on the stdio mutex
+    // (PICO_STDIO_DEADLOCK_TIMEOUT_MS) when a host opens the port and stops
+    // reading. That is survivable only because nothing waits on this task.
+    // Raising its priority above an application task would reintroduce exactly
+    // the hazard TP-0001 D5 disabled USB stdio to avoid.
+    xTaskCreate(logger_task, "log_usb", static_cast<configSTACK_DEPTH_TYPE>(stack_words), NULL,
+                static_cast<UBaseType_t>(priority), &loggerTaskHandle);
 }
 
 uint32_t Log::dropped()

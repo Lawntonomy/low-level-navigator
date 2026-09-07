@@ -38,6 +38,7 @@
 #include "app/safety.hpp"
 
 #include "hardware_drivers/encoder.hpp"
+#include "utility/logger.h"
 
 namespace
 {
@@ -316,6 +317,16 @@ int main()
     must_create(link_tx_task, "link_tx", rt::stack_link_tx, rt::prio_link_tx, rt::core_service);
     must_create(telemetry_task, "telem", rt::stack_telemetry, rt::prio_telemetry, rt::core_service);
     must_create(logger_task, "logger", rt::stack_logger, rt::prio_logger, rt::core_service);
+
+    // The USB verbose log (ADR-0003's Bulk channel). Separate from the task
+    // above, which drains the unframed uart1 console -- IF-0001 §2 defines
+    // Console and Bulk as different channels, and the console exists to be
+    // readable before any stack is up, which USB cannot be.
+    //
+    // Without this call the ring fills and nothing drains it, so every log line
+    // is silently discarded. Log:: creates its own task rather than going
+    // through must_create() because it owns the handle it needs to hold.
+    Log::start(rt::prio_log_usb, rt::stack_log_usb);
 
     // Armed last, so a slow boot cannot trip it before the control task exists
     // to feed it. Nothing blocking may be added after this point without
