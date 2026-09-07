@@ -251,6 +251,15 @@ extern "C" void vApplicationMallocFailedHook()
 
 int main()
 {
+    // FIRST -- before the console, the motors, or any interrupt: take a BOOTSEL
+    // request left by the previous boot. Returns immediately if there is none.
+    //
+    // It has to be here rather than where the request arrives. Measured on the
+    // bench: rom_reset_usb_boot() reaches BOOTSEL from a bare context but hangs
+    // inside the ROM when called from a FreeRTOS task, so the request is
+    // deferred across a reset instead. See bootloader.hpp.
+    bootloader::enter_if_requested();
+
     // Before anything that could move, and before the console: motors::init()
     // needs no logging, and doing it first shortens the window in which
     // driver_enable_pin sits in its undriven reset state by the time it takes

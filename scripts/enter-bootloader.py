@@ -98,7 +98,18 @@ def main():
         if not data:
             time.sleep(0.005)
             continue
-        for msg in parser.parse_buffer(data) or []:
+        # parse_buffer raises on a byte that is not the start of a valid frame,
+        # and there is always such a byte here: the reboot cuts whatever was in
+        # flight in half, and the port may hold a partial frame from before the
+        # request. A parse error is the expected shape of success, not a fault
+        # worth a traceback -- so drop the bad byte and carry on looking for a
+        # refusal in what follows.
+        try:
+            parsed = parser.parse_buffer(data) or []
+        except Exception:
+            continue
+
+        for msg in parsed:
             if msg.get_type() != "LAWN_FAULT_EVENT":
                 continue
             if msg.code != dialect.LAWN_FAULT_BOOTLOADER_REFUSED:
