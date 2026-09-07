@@ -12,3 +12,11 @@ docs/*.pdf
 
 # pymavlink generator venv (see generate-mavlink.sh)
 .venv/
+
+# Bench run logs and captured data (see scripts/bench/README.md for why these
+# are generated output, gitignored like build/, rather than committed -- and
+# how to override that for one run worth keeping).
+bench-logs/*
+!bench-logs/.gitkeep
+bench-data/*
+!bench-data/.gitkeep
