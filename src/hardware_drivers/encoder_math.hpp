@@ -14,6 +14,7 @@
 // caller. A mean of zero here means "no sample has ever landed", not "stopped".
 // See CAL-0 in system-design/test-plans/0002-self-calibration.md.
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 
@@ -123,6 +124,44 @@ inline float rpm_from_mean_period(float mean_counts)
 inline float rpm_from_periods(const uint32_t* samples, std::size_t count)
 {
     return rpm_from_mean_period(mean_period_counts(samples, count));
+}
+
+// --- Wire encoding ---------------------------------------------------------
+
+// LAWN_WHEEL_STATE carries speed as deci-rpm (rpm x 10) in an int16_t
+// (safety.hpp). This converts one wheel's rpm to that representation,
+// **saturating rather than wrapping** at the int16_t range.
+//
+// Wrapping is the failure this exists to prevent: an unguarded
+// `static_cast<int16_t>` on an out-of-range value is implementation-defined
+// and on this target wraps the sign, so a wheel spinning fast enough would be
+// reported as a wheel spinning fast in the OPPOSITE direction — a silently
+// wrong answer that looks perfectly plausible on the wire. A saturated value
+// is visibly pegged at the limit instead.
+//
+// Rounds to the nearest deci-rpm rather than truncating, so a converted value
+// fed back through /10 lands within 0.05 rpm of the input instead of being
+// biased toward zero.
+inline int16_t rpm_to_deci_rpm(float rpm)
+{
+    constexpr float scale = 10.0f;
+    constexpr float lo = static_cast<float>(INT16_MIN); // -32768
+    constexpr float hi = static_cast<float>(INT16_MAX); // 32767
+
+    const float scaled = std::round(rpm * scale);
+
+    // `!(scaled > lo)` rather than `scaled <= lo` so NaN — which every
+    // comparison against it reports false — also takes the saturating path
+    // instead of falling through to an out-of-range cast.
+    if (!(scaled > lo))
+    {
+        return INT16_MIN;
+    }
+    if (scaled > hi)
+    {
+        return INT16_MAX;
+    }
+    return static_cast<int16_t>(scaled);
 }
 
 } // namespace encoder

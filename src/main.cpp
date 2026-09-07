@@ -16,7 +16,9 @@
 //           through a stall" only makes sense once this exists: without it, a
 //           149 ms stall followed by recovery re-applies the full previous
 //           command in a single 5 ms period.
-//   SAF-20  wheel-speed validity (encoder reports stale RPM, issue #12)
+//   SAF-20  wheel-speed validity now reaches telemetry (issue #12), but is
+//           still not consumed for control — nothing here disarms or faults
+//           on encoder::Reading::valid == false
 //   SAF-54  local link-quality degrade (the inputs are collected, the check is
 //           not written — the Pi is currently the only consumer)
 
@@ -33,6 +35,7 @@
 #include "app/rt.h"
 #include "app/safety.hpp"
 
+#include "hardware_drivers/encoder.hpp"
 #include "hardware_drivers/gpio_defines.h"
 
 namespace
@@ -132,6 +135,15 @@ void motors_init()
         safety::record_applied(0, 0);
         (void)d;
 
+        // Observation only (issue #12, TP-0002 CAL-0): read both wheels every
+        // iteration, exactly once, per encoder.hpp's contract — freshness is
+        // judged by whether the DMA write pointer moved since the previous
+        // call, so skipping or doubling a poll here would corrupt the
+        // staleness measurement, not just delay it. NOT fed into control: the
+        // PID is not connected (see file header), so this exists only to carry
+        // the reading to telemetry across the core boundary.
+        encoder::publish_readings({encoder::read_left(), encoder::read_right()});
+
         // Fed here and nowhere else. A watchdog fed from a timer or an ISR
         // proves only that interrupts still work; it says nothing about whether
         // the task that can stop the motors is still running. Proposed SAF-16.
@@ -187,11 +199,16 @@ void motors_init()
         }
         if (now >= next_wheel)
         {
-            // Encoders are not wired up. Report validity FALSE so the Pi is
-            // told the data is untrustworthy rather than handed a plausible
-            // zero (SAF-20).
+            // SAF-20: the Pi is told the data is untrustworthy rather than
+            // handed a plausible zero. encoder::Reading::valid crosses the
+            // core boundary unmodified in encoder::WheelReadings and is
+            // reported exactly as read — this task never manufactures a zero
+            // rpm and calls it valid, and never invents a valid flag either.
+            const encoder::WheelReadings wheels = encoder::latest_readings();
             const safety::Status st = safety::status();
-            link::send_wheel_state(0, 0, st.left_applied, st.right_applied, false, false);
+            link::send_wheel_state(encoder::rpm_to_deci_rpm(wheels.left.rpm),
+                                   encoder::rpm_to_deci_rpm(wheels.right.rpm), st.left_applied,
+                                   st.right_applied, wheels.left.valid, wheels.right.valid);
             next_wheel = now + 20000; // 50 Hz
         }
         if (now >= next_stats)
@@ -265,6 +282,25 @@ int main()
     log_console::init();
     log_console::write_blocking("\r\n\r\n[boot] low-level navigator\r\n");
     log_console::write_blocking("[boot] motors in safe state\r\n");
+
+    // Observation only (issue #12, TP-0002 CAL-0): wires the wheel-speed
+    // reading to telemetry. Does NOT connect the PID or command any motion —
+    // control_task keeps calling motors_safe_state() unconditionally, exactly
+    // as before this change.
+    //
+    // PIO block: RP2350 has three (pio0-2). This claims pio2 and leaves the
+    // other two alone rather than picking whichever compiles. pwm.cpp's PIO
+    // PWM path is the other block's eventual tenant — not wired into this
+    // build yet (see the file header) but its two state machines need a home
+    // when it is. ADR-0010 (Proposed) separately wants a PIO block reserved
+    // for a drive-enable interlock and explicitly calls out keeping that
+    // block distinct from PWM and from the encoders, so this cannot simply
+    // take "the other" free block either. That leaves pio2 as the one block
+    // this firmware can claim today without pre-empting either future tenant;
+    // it has all four state machines free and encoder::init() only needs two
+    // (sm_index and sm_index+1).
+    encoder::init(pio2, 0);
+    log_console::write_blocking("[boot] encoder init complete\r\n");
 
     gpio_init(board::scope_pin);
     gpio_set_dir(board::scope_pin, GPIO_OUT);

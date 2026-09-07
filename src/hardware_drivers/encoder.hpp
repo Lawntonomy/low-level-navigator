@@ -40,4 +40,23 @@ void init(PIO pio, uint sm_index);
 Reading read_left();
 Reading read_right();
 
+// The two most recent readings, carried across the core boundary.
+//
+// read_left()/read_right() run on the control task (core 1); telemetry runs on
+// core 0. This pair follows safety.hpp's pattern: publish() is called once per
+// control iteration right after the reads, snapshot() is called by telemetry,
+// and both take a genuine SMP critical section rather than a bare flag. Unlike
+// safety.hpp there is no timestamp to sample inside the lock — the readings
+// already carry everything time-sensitive (Reading::valid) — so the section is
+// a plain struct copy: two floats and two bools, nothing more (rt.h: every
+// critical section here contends the spinlock pair the control task needs).
+struct WheelReadings
+{
+    Reading left;
+    Reading right;
+};
+
+void publish_readings(const WheelReadings& readings);
+WheelReadings latest_readings();
+
 } // namespace encoder

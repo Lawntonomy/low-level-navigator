@@ -1,4 +1,8 @@
 #include "encoder.hpp"
+
+#include "FreeRTOS.h"
+#include "task.h"
+
 #include "utility/logger.h"
 
 #define CAPTURE_DEPTH 8
@@ -35,6 +39,12 @@ struct Capture
 
 Capture left{left_buffer, -1, 0, 0};
 Capture right{right_buffer, -1, 0, 0};
+
+// Cross-core mailbox for encoder::publish_readings()/latest_readings(). Starts
+// invalid on both sides, matching what read_left()/read_right() would report
+// before the first poll — telemetry must never see a stale "true" for a
+// reading that has not happened yet.
+encoder::WheelReadings latest{};
 
 int setup_dma(PIO pio, uint sm, volatile uint32_t* array)
 {
@@ -142,4 +152,19 @@ encoder::Reading encoder::read_left()
 encoder::Reading encoder::read_right()
 {
     return read(right);
+}
+
+void encoder::publish_readings(const WheelReadings& readings)
+{
+    taskENTER_CRITICAL();
+    latest = readings;
+    taskEXIT_CRITICAL();
+}
+
+encoder::WheelReadings encoder::latest_readings()
+{
+    taskENTER_CRITICAL();
+    const WheelReadings snapshot = latest;
+    taskEXIT_CRITICAL();
+    return snapshot;
 }

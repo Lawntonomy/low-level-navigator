@@ -6,6 +6,7 @@
 // hardware half (PIO, DMA, freshness) is not testable here and is not tested.
 
 #include <cmath>
+#include <limits>
 
 #include <gtest/gtest.h>
 
@@ -179,4 +180,77 @@ TEST(EncoderMath, TStalePlaceholderImpliesThreeRpmFloor)
     const float counts_at_t_stale =
         (static_cast<float>(encoder::t_stale_us) / 1e6f) * encoder::counts_per_second;
     EXPECT_FLOAT_EQ(encoder::rpm_from_mean_period(counts_at_t_stale), 3.0f);
+}
+
+// --------------------------------------------------------------------------
+// rpm -> deci-rpm, the wire encoding (LAWN_WHEEL_STATE carries int16_t)
+// --------------------------------------------------------------------------
+
+TEST(EncoderMath, DeciRpmZeroIsZero)
+{
+    EXPECT_EQ(encoder::rpm_to_deci_rpm(0.0f), 0);
+}
+
+TEST(EncoderMath, DeciRpmWorkedByHand)
+{
+    // 3 rpm -> 30 deci-rpm, the t_stale floor from the test above, chosen
+    // because it is a number this module already asserts elsewhere.
+    EXPECT_EQ(encoder::rpm_to_deci_rpm(3.0f), 30);
+    // 200.5 rpm -> 2005 deci-rpm. 200.5 and 2005 are both exactly
+    // representable in float, so this checks the scaling with no rounding
+    // involved.
+    EXPECT_EQ(encoder::rpm_to_deci_rpm(200.5f), 2005);
+}
+
+TEST(EncoderMath, DeciRpmIsNegativeForNegativeRpm)
+{
+    // The driver never produces a negative rpm today (encoder.pio measures
+    // magnitude only, per encoder.hpp) but the conversion is a pure function
+    // and must not invert or clamp a negative input to zero.
+    EXPECT_EQ(encoder::rpm_to_deci_rpm(-3.0f), -30);
+    EXPECT_EQ(encoder::rpm_to_deci_rpm(-200.5f), -2005);
+}
+
+TEST(EncoderMath, DeciRpmRoundsToNearest)
+{
+    // 12.36 rpm x 10 = 123.6, which rounds to 124 -- a value chosen so
+    // truncation (123) and round-to-nearest (124) disagree, to actually
+    // exercise rounding rather than pass either way.
+    EXPECT_EQ(encoder::rpm_to_deci_rpm(12.36f), 124);
+    EXPECT_EQ(encoder::rpm_to_deci_rpm(-12.36f), -124);
+}
+
+TEST(EncoderMath, DeciRpmSaturatesAtInt16Max)
+{
+    // Well past the int16_t range: this drivetrain cannot reach 4000 rpm (see
+    // the aliasing-margin comment in encoder.cpp), but the conversion itself
+    // must not care what is physically plausible.
+    EXPECT_EQ(encoder::rpm_to_deci_rpm(4000.0f), 32767);
+    EXPECT_EQ(encoder::rpm_to_deci_rpm(1.0e9f), 32767);
+}
+
+TEST(EncoderMath, DeciRpmSaturatesAtInt16Min)
+{
+    EXPECT_EQ(encoder::rpm_to_deci_rpm(-4000.0f), -32768);
+    EXPECT_EQ(encoder::rpm_to_deci_rpm(-1.0e9f), -32768);
+}
+
+TEST(EncoderMath, DeciRpmDoesNotWrapSignAtTheBoundary)
+{
+    // The defect this function exists to prevent: a naive
+    // static_cast<int16_t> on an out-of-range value can wrap to a plausible
+    // value of the OPPOSITE sign. 4000 rpm is comfortably past INT16_MAX
+    // deci-rpm (32767); a wrapped result would be negative. It must not be.
+    EXPECT_GT(encoder::rpm_to_deci_rpm(4000.0f), 0);
+    EXPECT_LT(encoder::rpm_to_deci_rpm(-4000.0f), 0);
+}
+
+TEST(EncoderMath, DeciRpmHandlesNonFiniteWithoutUndefinedBehavior)
+{
+    // rpm_from_mean_period() cannot itself produce NaN or infinity, but this
+    // function is a public seam and must not invoke undefined behavior
+    // (out-of-range float-to-int cast) if it is ever handed one.
+    EXPECT_EQ(encoder::rpm_to_deci_rpm(std::nanf("")), -32768);
+    EXPECT_EQ(encoder::rpm_to_deci_rpm(std::numeric_limits<float>::infinity()), 32767);
+    EXPECT_EQ(encoder::rpm_to_deci_rpm(-std::numeric_limits<float>::infinity()), -32768);
 }
