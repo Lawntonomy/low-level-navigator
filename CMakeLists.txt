@@ -63,8 +63,28 @@ pico_sdk_init()
 # The old PICO_DEFAULT_UART_* override put stdio on GPIO 16/17, which is the
 # SAME uart0 the command link now uses (RP2350 datasheet Table 3) - keeping it
 # would have interleaved printf with protocol frames on the safety link.
-pico_enable_stdio_usb(low-level-nav 0)
+#
+# stdio_uart stays off for that reason. stdio_usb is now ON: ADR-0003 assigns
+# verbose runtime logging to USB CDC, and IF-0001 SS2 puts it on the Bulk
+# channel. src/utility/logger.{h,cpp} is what makes turning this on safe --
+# every Log:: call formats into a drop-on-full ring and returns; only one
+# low-priority task, which is not the control task and does not feed the
+# watchdog, ever calls printf(). See logger.h's header comment for the whole
+# argument. Nothing on this path may be required for safe operation.
+pico_enable_stdio_usb(low-level-nav 1)
 pico_enable_stdio_uart(low-level-nav 0)
+
+# Belt-and-braces, NOT the fix by itself: this only breaks the wait in
+# stdio_usb_out_chars() for tud_cdc_write_available() (pico-sdk
+# src/rp2_common/pico_stdio_usb/stdio_usb.c:121), making an unread port drop
+# bytes after 0 us instead of the 500000 us default. It does nothing about
+# the SAME function's stdio_usb_mutex, taken with
+# mutex_try_enter_block_until(..., PICO_STDIO_DEADLOCK_TIMEOUT_MS) at line 103
+# -- default 1000 ms -- which is why the logger task, not this define, is the
+# actual safety argument.
+target_compile_definitions(low-level-nav PRIVATE
+    PICO_STDIO_USB_STDOUT_TIMEOUT_US=0
+)
 
 pico_generate_pio_header(low-level-nav ${CMAKE_CURRENT_SOURCE_DIR}/src/hardware_drivers/encoder.pio)
 pico_generate_pio_header(low-level-nav ${CMAKE_CURRENT_SOURCE_DIR}/src/hardware_drivers/pwm.pio)
