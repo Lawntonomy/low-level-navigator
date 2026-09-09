@@ -29,11 +29,34 @@ script in this directory, reviewed before it runs, is not.
   `t_stale` -- can be watched. Does not command motion (see the script's header for why that is
   currently true, and when to re-check it).
 
+- **`link-status.sh`** -- read-only: USB enumeration, `picotool info`, a read of the Pico's CDC,
+  and a passive listen on the command link. Sends nothing to the board. Run it before any flash,
+  because what it finds decides *how* to flash: telemetry on the link means a `low-level-nav` build
+  is resident and `cal0-check.sh` can reflash it; a `2e8a` device with no telemetry means a probe is
+  resident and `picotool load -f` works directly; neither means BOOTSEL.
+
+- **`imu-probe.sh`** -- flashes `diagnostics/imu-probe` and reads its report, answering
+  `research/imu-driver-findings.md` §7 on hardware: LSM6DSOX on the bus at GP12/13, `WHO_AM_I`,
+  and whether INT1 on GP14 produces data-ready edges. Does not command motion. Tries
+  `picotool load -f` first and falls back to `enter-bootloader.py`.
+
+- **`restore-lln.sh`** -- puts `low-level-nav` back after a probe run. Distinct from
+  `cal0-check.sh`, which reaches the bootloader by asking the resident firmware over the command
+  link and so requires that firmware to already *be* `low-level-nav`; this covers the other
+  direction, where a probe is resident and its USB stdio makes `picotool load -f` work directly.
+
 - **`lib/common.sh`** -- shared host/path config and the sudo guard, sourced by the scripts above.
   Not run directly.
 
 - **`pi/wheel_state_monitor.py`** -- runs ON THE PI (opens a local serial device); copied there by
   `cal0-check.sh`, not invoked directly from here.
+
+- **`pi/link_listen.py`** -- also runs ON THE PI; copied there by `link-status.sh`. A passive
+  command-link listener that transmits nothing, so it cannot arm or move the machine. Deliberately
+  dependency-free -- no pymavlink, no generated dialect -- which costs it checksum validation
+  (`CRC_EXTRA` is per-message and lives in the dialect it avoids needing), so a stray byte can
+  invent a frame. That shows up as a one-off count against an implausible message id, easy to read
+  past when real traffic is arriving at a steady 20-50 Hz.
 
 ## Preconditions, every time
 
