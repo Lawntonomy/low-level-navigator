@@ -113,11 +113,15 @@ namespace
     for (;;)
     {
         link::rx_poll();
-        // Polled rather than interrupt-driven. At 1 Mbaud the 32-byte FIFO
-        // fills in 320 us, so this period is 3x the overflow time — adequate at
-        // the IF-0001 §6 rates (~1 byte/ms inbound) but not under a burst.
-        // An RX interrupt would fix that and the t2 timestamp error together;
-        // it is the change to make before bench time, not after.
+        // The UART is now drained by an interrupt into a 512-byte ring, so this
+        // period no longer races the 320 us FIFO overflow it used to lose to —
+        // it bounds parse latency, not data loss. The ring holds 5.12 ms of
+        // airtime at 1 Mbaud against this 1 ms period.
+        //
+        // That interrupt also moved the §7.4 t2 stamp out of TP-0001 T4.1's
+        // FORBIDDEN (±1 ms, scheduler-tick) class into its ±25 µs class. The
+        // remaining step to ±2 µs is a pin-edge capture; see link.cpp for why
+        // it is not done here and what would justify it.
         vTaskDelay(pdMS_TO_TICKS(1));
     }
 }
