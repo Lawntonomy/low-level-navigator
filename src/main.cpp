@@ -38,6 +38,8 @@
 #include "app/safety.hpp"
 
 #include "hardware_drivers/encoder.hpp"
+#include "hardware_drivers/imu_i2c.hpp"
+#include "hardware_drivers/lsm6dsox.hpp"
 
 namespace
 {
@@ -300,6 +302,38 @@ int main()
     // interrupts are still masked here. Benign for the polled calls below, and
     // a landmine for anything interrupt-driven added later.
     portENABLE_INTERRUPTS();
+
+    // IMU bring-up sits here, AFTER interrupts are unmasked, deliberately.
+    // imu_i2c's init-time helpers use the SDK's bounded-timeout I2C calls, and
+    // a timeout that cannot fire is not a timeout -- running them inside the
+    // masked window above would risk a wedged bus hanging boot instead of
+    // failing a check.
+    //
+    // ADR-0006 places rollover/tilt detection and the SAF-23 direction
+    // cross-check BELOW the line, consuming the roll/pitch filter, so the
+    // LSM6DSOX is a safety-designated sensor whose consumers are not yet
+    // written. SAF-25: a sensor designated as an input to a below-the-line
+    // safety monitor is identity-checked at init, and the machine does not arm
+    // if that check fails. The asymmetry is what decides it -- a false positive
+    // here is a machine that will not arm, sitting still with a person beside
+    // it, while a false negative is a machine that runs a whole session
+    // believing it has a tilt sensor it does not have, with WHO_AM_I checked
+    // once and no later chance to notice.
+    if (!imu_i2c::init() || !lsm6dsox::configure())
+    {
+        log_console::write_blocking("[boot] IMU init FAILED - latching fault, will not arm\r\n");
+        safety::raise_fault(safety::Fault::init_failed);
+
+        // raise_fault takes a critical section, and the SMP vTaskExitCritical
+        // only unmasks once the scheduler is running -- which it is not yet.
+        // Without this, interrupts stay masked through link::init() and
+        // watchdog_enable(). See the comment above.
+        portENABLE_INTERRUPTS();
+
+        // Deliberately NOT a halt(). The machine must still boot, talk to the
+        // Pi, and report MAV_STATE_CRITICAL with fault 7 at 20 Hz -- a brick
+        // reports nothing. It simply refuses to arm, for the life of this boot.
+    }
 
     if (!link::init())
     {
