@@ -125,10 +125,43 @@ TEST(ImuStallGaps, PerfectCadenceLosesNothing)
     EXPECT_EQ(imu_stall::missedSamples(0, 0, kPeriodUs), 0u);
 }
 
-TEST(ImuStallGaps, JitterShortOfAWholePeriodLosesNothing)
+TEST(ImuStallGaps, JitterShortOfHalfAPeriodLosesNothing)
 {
-    // 1.9 periods still means the very next sample arrived, late.
-    EXPECT_EQ(imu_stall::missedSamples((kPeriodUs * 19) / 10, 0, kPeriodUs), 0u);
+    // Rounds to the nearest slot, so tolerance is half a period either way, not
+    // a whole one. This test previously asserted that 1.9 periods reported 0 --
+    // which looked like generous jitter tolerance and was in fact the bug: the
+    // divisor is the NOMINAL period while the part runs 0.75% faster, so a real
+    // single-sample loss (2 x 4772 = 9544 us against a 4807 us divisor) landed
+    // at 1.98 slots and was swallowed by exactly that tolerance.
+    EXPECT_EQ(imu_stall::missedSamples((kPeriodUs * 14) / 10, 0, kPeriodUs), 0u);
+    EXPECT_EQ(imu_stall::missedSamples((kPeriodUs * 16) / 10, 0, kPeriodUs), 1u);
+}
+
+TEST(ImuStallGaps, RealSingleLossAtMeasuredCadenceIsNotSwallowed)
+{
+    // The regression that motivated the rounding change, in its own units.
+    // Measured period on this board is 4772 us (bench log 2026-09-09); the
+    // divisor is the nominal 4807 us. One genuinely lost sample must report 1,
+    // and a healthy interval must still report 0.
+    constexpr uint32_t kMeasuredUs = 4772;
+    EXPECT_EQ(imu_stall::missedSamples(kMeasuredUs, 0, imu_stall::nominal_period_us), 0u);
+    EXPECT_EQ(imu_stall::missedSamples(2 * kMeasuredUs, 0, imu_stall::nominal_period_us), 1u);
+    EXPECT_EQ(imu_stall::missedSamples(3 * kMeasuredUs, 0, imu_stall::nominal_period_us), 2u);
+}
+
+TEST(ImuStallThreshold, DerivedFromWorstCasePeriodNotNominal)
+{
+    // T_imu_stale = 2 x T_s_worst + D. Guards the arithmetic, not the inputs:
+    // if the ODR or the assumed oscillator bound changes, this recomputes.
+    EXPECT_GT(imu_stall::worst_case_period_us, imu_stall::nominal_period_us);
+    EXPECT_EQ(imu_stall::stall_timeout_us,
+              2u * imu_stall::worst_case_period_us + imu_stall::burst_delay_us);
+
+    // The floor the derivation rests on: the largest age a HEALTHY stream can
+    // show is one worst-case period plus the burst delay, so the threshold must
+    // sit strictly above it or it fires on a working sensor.
+    EXPECT_GT(imu_stall::stall_timeout_us,
+              imu_stall::worst_case_period_us + imu_stall::burst_delay_us);
 }
 
 TEST(ImuStallGaps, EachWholeSkippedPeriodIsOneLostSample)
