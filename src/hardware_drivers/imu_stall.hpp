@@ -54,18 +54,85 @@ inline constexpr uint32_t periodUsForOdr(uint32_t odrHz)
 // 4807 us at 208 Hz.
 inline constexpr uint32_t nominal_period_us = periodUsForOdr(nominal_odr_hz);
 
-// How many nominal periods may pass with no completed sample before the stream
-// is called stalled.
+// --- Stall threshold, derived ---------------------------------------------
 //
-// **This is a policy placeholder, not a derivation.** Three periods is ~14 ms
-// at 208 Hz: long enough that ordinary interrupt latency and ODR jitter cannot
-// trip it, short enough to be far below any plausible estimator horizon.
-// Nothing in system-design pins it down -- no requirement states how long the
-// estimator may go without an inertial sample -- so it is chosen, and it is
-// chosen deliberately tight because the cost of a false stall (the consumer
-// distrusts IMU data) is much lower than the cost of a missed one (the
-// estimator is fed confidently stale attitude, which findings section 4 calls
-// out as the worse outcome by design).
+// T_imu_stale = 2 x T_s_worst + D. Derived 2026-09-09; this replaces an earlier
+// "three nominal periods" placeholder that landed nearby by luck rather than by
+// argument. Expressed as arithmetic, not as a literal, so it recomputes if the
+// ODR changes -- IF-0001 still marks 208 Hz provisional.
+//
+// **Why 2x and not 1x.** The largest age observable in a HEALTHY stream is
+// T_s + D, not T_s: the timestamp is latched at INT1 IRQ entry but only becomes
+// visible when the burst completes. Just before sample N+1 publishes, the newest
+// visible stamp is N's, already aged T_s + D. That sets the floor at 6081 us.
+// The second T_s_worst is headroom for DMA-completion delay on core 0, which
+// shares that core with link RX, link TX, telemetry and logging and has no
+// measured worst-case latency.
+//
+// **Provenance, honestly labelled.** E_slow is the weakest input and the one
+// that dominates: it is an ENCODING bound, not a datasheet bound. Nobody has
+// found an ODR accuracy spec across process and temperature; INTERNAL_FREQ_FINE
+// (0x63) is 8 bits at 0.15%/step, which read as signed gives -19.2%..+19.05%,
+// and that range is standing in for a tolerance. D has never been measured
+// either -- it is 138 SCL periods at 400 kHz, arithmetic.
+//
+// **The saving grace is that it barely matters.** Across the whole plausible
+// range of E_slow (0% to 19.2%) the threshold moves 9966 -> 11812 us, a span
+// smaller than one 5 ms control period. The detector's output is quantised to
+// that period anyway, so taking the worst case costs nothing observable.
+//
+// **Validity condition, so it can be checked rather than assumed:** this holds
+// while the worst-case INT1-edge-to-visible-on-core-1 delay stays <= 6081 us.
+// Beyond that the headroom is gone and the threshold false-fires.
+inline constexpr uint32_t odr_error_slow_ppk = 192; // 19.2%, parts per thousand
+
+// Burst transport delay: 138 SCL periods at 400 kHz. Arithmetic, never timed.
+inline constexpr uint32_t burst_delay_us = 350;
+
+inline constexpr uint32_t worstCasePeriodUs(uint32_t nominalUs)
+{
+    return nominalUs + (nominalUs * odr_error_slow_ppk) / 1000u;
+}
+
+inline constexpr uint32_t worst_case_period_us = worstCasePeriodUs(nominal_period_us);
+
+// 11812 us at 208 Hz nominal.
+inline constexpr uint32_t stall_timeout_us = 2u * worst_case_period_us + burst_delay_us;
+
+// --- Recovery policy -------------------------------------------------------
+//
+// Consecutive failed recovery attempts before a stall is called persistent
+// rather than transient.
+//
+// **This is policy, not a derivation, and it cannot be derived from what
+// exists.** No fault has ever been injected on this board, so there is no
+// distribution of "attempts needed to recover" to derive from. What IS confirmed
+// is the mechanism, deterministically and on the cause that matters most: the
+// first probe run polled STATUS_REG without draining and saw 0 edges; the second
+// drained the output registers and saw 209 edges against 210 drains, its first
+// drain performed on an INT1 that had been latched high through a 100 ms settle.
+// A forced read either clears the latch or it does not -- repetition buys no
+// information once that is true.
+//
+// So M exists only to separate causes, and is bracketed by argument: M >= 2
+// because one attempt can be lost to a race with an in-flight burst, which is
+// transient by construction and not a fault; M <= 5 because the blind window is
+// (M + 1) x (stall_timeout_us + control period), and at M = 5 that is 101 ms
+// against the 224 ms it takes to cover d_allow at the 0.68 m/s cap. M = 3 gives
+// 67 ms, 30% of that.
+//
+// **The success criterion matters more than the value.** An attempt counts as
+// FAILED unless a completed sample follows within stall_timeout_us. "The forced
+// read returned 12 bytes" is the wrong test: after a sensor brown-out INT1_CTRL
+// reverts to 0x00, so the read succeeds forever while no edge is ever generated
+// -- and M would never increment in exactly the failure it exists to report.
+//
+// What would make this measured: fault injection -- hold SDA low, pull the
+// sensor's 3V3 mid-stream, deliberately skip a drain -- and count attempts to
+// recovery. That has never been run.
+inline constexpr uint32_t recovery_attempts_before_persistent = 3;
+
+// Retained for callers that want an explicit period count.
 inline constexpr uint32_t stall_periods = 3;
 
 // --- Timeout arithmetic ---------------------------------------------------
@@ -109,8 +176,23 @@ inline constexpr bool isStalled(uint64_t nowUs, uint64_t lastSampleUs, uint32_t 
 // and did not.
 //
 // A perfect stream gives elapsed == periodUs and therefore 0. Two periods of
-// silence means one sample was lost, and so on. Integer division supplies the
-// jitter tolerance for free: an elapsed time of 1.9 periods still reports 0.
+// silence means one sample was lost, and so on.
+//
+// **Rounds to the nearest slot rather than truncating, and that is a fix, not a
+// preference.** Truncation looked like free jitter tolerance and was in fact
+// hiding real losses, because the divisor is the NOMINAL period while the part
+// runs measurably faster: 208 Hz nominal is 4807 us, and this board measures
+// 4772 us (0.75% fast, 208 intervals, bench log 2026-09-09). One genuinely lost
+// sample therefore gives elapsed = 2 x 4772 = 9544 us, and 9544 / 4807 = 1 slot,
+// so missed came out 0. Single-sample losses were invisible in a wire field
+// ADR-0007 requires be honest, and they were invisible *because* the divisor was
+// 0.75% too large -- the tolerance was being paid for with a whole sample.
+//
+// Rounding is correct in both directions and does not depend on the sign of that
+// error: a healthy 4772 us interval still gives 0, and a 9544 us one gives 1. It
+// declares a loss above 1.5 periods rather than 2.0, which is ample -- the
+// measured interval spread across a full second was within the 1 us capture
+// resolution.
 //
 // Returns 0 for a zero period -- a cadence that is not known cannot be used to
 // count what is missing from it, and inventing a number here would put a
@@ -122,7 +204,8 @@ inline constexpr uint32_t missedSamples(uint64_t nowUs, uint64_t lastSampleUs, u
         return 0;
     }
     const uint64_t elapsed = nowUs - lastSampleUs;
-    const uint64_t slots = elapsed / static_cast<uint64_t>(periodUs);
+    const uint64_t slots =
+        (elapsed + static_cast<uint64_t>(periodUs) / 2u) / static_cast<uint64_t>(periodUs);
     if (slots == 0)
     {
         return 0;
