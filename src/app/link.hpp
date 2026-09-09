@@ -57,4 +57,23 @@ bool send_fault_event(uint8_t code, uint8_t nav_state, bool latched);
 uint32_t tx_dropped();
 uint32_t tx_peak_bytes();
 
+// Bytes lost because the RX ring was full when the UART interrupt ran. Should
+// be zero: the ring is 16x the hardware FIFO and 5x the task period's worth of
+// airtime, so a nonzero value means the RX task was starved, not that the link
+// was fast.
+uint32_t rx_overrun_bytes();
+
+// Bytes the UART itself lost, reported by the OE status bit alongside the data.
+// Distinct from rx_overrun_bytes(): that one means the RING was full, this one
+// means the ISR did not run in time — which is what happens if interrupts are
+// masked for longer than the 32-byte FIFO holds (320 us at 1 Mbaud). Without
+// this, a zero from rx_overrun_bytes() would wrongly read as "nothing lost".
+uint32_t rx_hw_overrun_bytes();
+
+// TIMESYNC requests declined because the frame's arrival stamp could not be
+// vouched for (two frames arrived without the RX ring draining between them).
+// Declining biases nothing; answering from a stale t2 would. Nonzero here means
+// the clock model is converging more slowly than the exchange rate suggests.
+uint32_t sync_declined_count();
+
 } // namespace link

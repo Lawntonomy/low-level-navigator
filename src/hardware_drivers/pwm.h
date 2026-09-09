@@ -9,6 +9,30 @@ void init(PIO pio, uint sm_index);
 
 void pio_pwm_set_period(PIO pio, uint sm, uint32_t period);
 
-void pio_pwm_set_level(PIO pio, uint sm, uint32_t level);
+// Queue a new duty level. NON-BLOCKING: returns false and counts a drop rather
+// than spinning if the state machine's TX FIFO is full.
+//
+// **A dropped write is NOT fail-safe.** pwm.pio does `pull noblock`, which
+// copies X back into the OSR when the FIFO is empty, so the state machine holds
+// its PREVIOUS level indefinitely. A dropped write therefore means "keep doing
+// what you were doing", not "stop", so any caller on a stop path must check it.
+//
+// **No such caller exists yet, and a stop path must not be built on this.**
+// motors::safe_state() zeroes the PWM pins with gpio_put(), which does nothing
+// once pio_gpio_init() has muxed the pad to PIO — so when PIO PWM is attached,
+// safe_state() will silently fail to stop the wheels. Fixing that needs
+// safe_state() to act THROUGH pio (disable the state machine, or reclaim the
+// pad with gpio_set_function(GPIO_FUNC_SIO) first), and it must not depend on
+// this function succeeding, because a refused write holds the previous duty.
+bool pio_pwm_set_level(PIO pio, uint sm, uint32_t level);
+
+// Writes refused because the TX FIFO was full, since boot. Monotonic.
+//
+// Should be zero in normal operation and is worth reporting if it ever is not:
+// at a 65535-count period with no clock divider the state machine consumes one
+// word every ~437 us, while the control task writes every 5 ms, so the FIFO
+// drains about eleven times faster than it fills. A nonzero count means the
+// state machine is not running.
+uint32_t dropped_writes();
 
 } // namespace pwm

@@ -113,11 +113,15 @@ namespace
     for (;;)
     {
         link::rx_poll();
-        // Polled rather than interrupt-driven. At 1 Mbaud the 32-byte FIFO
-        // fills in 320 us, so this period is 3x the overflow time — adequate at
-        // the IF-0001 §6 rates (~1 byte/ms inbound) but not under a burst.
-        // An RX interrupt would fix that and the t2 timestamp error together;
-        // it is the change to make before bench time, not after.
+        // The UART is now drained by an interrupt into a 512-byte ring, so this
+        // period no longer races the 320 us FIFO overflow it used to lose to —
+        // it bounds parse latency, not data loss. The ring holds 5.12 ms of
+        // airtime at 1 Mbaud against this 1 ms period.
+        //
+        // That interrupt also moved the §7.4 t2 stamp out of TP-0001 T4.1's
+        // FORBIDDEN (±1 ms, scheduler-tick) class into its ±25 µs class. The
+        // remaining step to ±2 µs is a pin-edge capture; see link.cpp for why
+        // it is not done here and what would justify it.
         vTaskDelay(pdMS_TO_TICKS(1));
     }
 }
@@ -327,6 +331,17 @@ int main()
     watchdog_enable(rt::watchdog_timeout_ms, true);
 
     log_console::write_blocking("[boot] starting scheduler\r\n");
+
+    // Same trap as after safety::init(), and it matters more now. Every
+    // taskENTER_CRITICAL() above — inside link::init()'s console write, inside
+    // each xTaskCreate — masks interrupts, and the SMP vTaskExitCritical does
+    // not unmask while xSchedulerRunning is false. The command UART's RX
+    // interrupt is armed by link::init(), so without this it stays masked
+    // through the write_blocking above: 27 bytes at 115200 is 2.3 ms, against a
+    // 32-byte RX FIFO that overflows in 320 us at 1 Mbaud. A peer already
+    // transmitting would lose ~230 bytes in hardware before the first task ran.
+    portENABLE_INTERRUPTS();
+
     vTaskStartScheduler();
 
     halt("[FATAL] scheduler returned\r\n");

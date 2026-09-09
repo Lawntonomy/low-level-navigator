@@ -2,6 +2,7 @@
 
 #include "FreeRTOS.h"
 #include "hardware/gpio.h"
+#include "hardware/irq.h"
 #include "hardware/uart.h"
 #include "pico/time.h"
 #include "task.h"
@@ -47,18 +48,175 @@ struct PendingSync
 };
 PendingSync pending_sync;
 
-// Timestamp of the byte that opened the frame being parsed.
+// RX byte ring. Produced by the UART interrupt, consumed by rx_poll() on the
+// link RX task.
+//
+// Single producer, single consumer, and BOTH RUN ON CORE 0: link::init() is
+// called from main() before vTaskStartScheduler(), so irq_set_enabled() arms
+// the interrupt on core 0's NVIC, and the RX task is pinned to rt::core_service
+// which is core 0. That is what makes plain volatile sufficient here rather
+// than the real cross-core synchronisation rt.h warns about. **If either half
+// ever moves cores, this needs revisiting**, not merely re-testing.
+//
+// 512 bytes is 16x the UART's 32-byte FIFO and 5.12 ms of airtime at 1 Mbaud,
+// against a 1 ms task period — so the ring, not the FIFO, absorbs a burst.
+//
+// head and tail are FREE-RUNNING and masked only at index time. Storing masked
+// positions would let a stale batch record alias onto a byte 512 arrivals later
+// and be reported as its arrival time; free-running counters make that
+// impossible, and incidentally make all 512 bytes usable rather than 511.
+constexpr uint32_t rx_ring_bytes = 512;
+constexpr uint32_t rx_ring_mask = rx_ring_bytes - 1;
+static_assert((rx_ring_bytes & rx_ring_mask) == 0, "ring must be a power of two");
+
+uint8_t rx_buf[rx_ring_bytes];
+volatile uint32_t rx_head;        // written by the ISR only, free-running
+volatile uint32_t rx_tail;        // written by the task only, free-running
+volatile uint32_t rx_overrun;     // bytes lost because the RING was full
+volatile uint32_t rx_hw_overrun;  // bytes lost in the UART's own FIFO (OE)
+
+// Arrival records, one per ISR invocation.
+//
+// **Not one per burst.** A per-burst stamp would describe only the first frame
+// of each burst, and at IF-0001 §6 rates the Pi emits HEARTBEAT (21 B on the
+// wire), LAWN_DRIVE_CMD (16 B) and LAWN_TIMESYNC (37 B) from one loop pass —
+// 74 bytes, 740 us at 1 Mbaud, comfortably inside one 1 ms poll. The heartbeat
+// would open every burst and the sync request would never be stampable, so
+// every sync exchange would be declined and the ADR-0007 clock model would
+// never converge. link-stub/pi/link_stub.py:196-222 sends exactly that way.
+//
+// 32 records covers a 1 ms poll at 1 Mbaud even at the 4-byte trigger level
+// (100 bytes / 4 = 25 invocations). Overflow degrades to "no stamp", never to
+// a wrong one.
+struct RxBatch
+{
+    uint32_t first_pos; // free-running ring position of this batch's first byte
+    uint32_t count;
+    uint64_t t_entry_us; // time_us_64() at ISR entry
+};
+
+constexpr uint32_t rx_batch_slots = 32;
+constexpr uint32_t rx_batch_mask = rx_batch_slots - 1;
+static_assert((rx_batch_slots & rx_batch_mask) == 0, "must be a power of two");
+
+RxBatch rx_batch[rx_batch_slots];
+volatile uint32_t rx_batch_head; // ISR only, free-running
+volatile uint32_t rx_batch_tail; // task only, free-running
+
+// Microseconds to clock n bytes at 8N1 (10 bits per byte). Used both to
+// back-date an arrival in the ISR and to forward-date t3 in emit_timesync();
+// defined up here because the ISR is the earlier caller.
+constexpr uint64_t wire_time_us(uint32_t bytes)
+{
+    return (static_cast<uint64_t>(bytes) * 10ull * 1000000ull) / board::cmd_baud;
+}
+
+// Timestamp of the byte that opened the frame being parsed, and whether it can
+// be trusted.
 //
 // IF-0001 §7.4 requires t2 at the start-bit edge, captured in hardware. This is
-// the FIFO-read time of the first byte instead, so the error is bounded by the
-// RX task's POLL PERIOD (1 ms), not by the FIFO trigger level — a byte that
-// arrives just after a poll waits up to a full period before it is stamped.
+// the ISR's entry time BACK-DATED by the wire time of the bytes that preceded
+// this one in the same batch.
 //
-// That is ~±1 ms, which §7.4's table lists as the FORBIDDEN class. It is
-// tolerable only because nothing consumes the clock model yet. TP-0001 T4.1
-// specifies the PIO edge capture that replaces it; an RX interrupt would also
-// fix it, and is the cheaper of the two.
+// The back-dating is not cosmetic. The RX trigger is 4 bytes (see init), so an
+// uncorrected ISR-entry stamp is ~40 us LATE at 1 Mbaud — and uniformly so.
+// §7.4 computes offset = ((t2 - t1) + (t3 - t4)) / 2, which turns a uniform
+// +40 us on t2 into a +20 us one-sided offset BIAS. Its min-filter cannot
+// remove that: a constant lateness raises every sample's measured delay
+// equally, so the same samples survive the filter and carry the bias into the
+// regression. Jitter averages out; bias does not. T4.1's "±25 us class" figure
+// describes symmetric jitter, which this was not.
+//
+// Residual error after back-dating is bounded by the drain duration — bytes
+// that landed in the FIFO *during* the drain arrived after t_entry and are
+// back-dated slightly too far. A full 32-byte drain is ~6 us at 150 MHz, so
+// that residual is under 10 us and, unlike the 40 us it replaces, it is not
+// one-signed across trigger levels.
+//
+// T4.1's ±2 us class still needs a pin-edge capture (GPIO IRQ or PIO). Add it
+// if the clock-residual measurement (ADR-0009's "single most important bench
+// measurement") shows the fit is sync-limited.
+//
+// `valid` is false when the batch record covering the frame's first byte has
+// already been retired — the ring outran the record buffer. A TIMESYNC answered
+// from a stamp that is not this frame's corrupts the fit silently, so the
+// response is declined instead and the peer retries.
 uint64_t rx_frame_start_us;
+bool rx_frame_start_valid;
+volatile uint32_t sync_declined; // TIMESYNC requests dropped for an unknown t2
+
+// UART RX interrupt. Drains the hardware FIFO into the ring so that FIFO
+// residency is bounded by interrupt latency rather than by the 1 ms task
+// period; at 1 Mbaud the 32-byte FIFO overflows in 320 us, so the old poll was
+// three times slower than the thing it was racing.
+void on_cmd_uart_rx()
+{
+    uart_hw_t* const hw = uart_get_hw(board::cmd_uart());
+
+    const uint64_t now = time_us_64();
+    const uint32_t batch_first = rx_head;
+    uint32_t pushed = 0;
+
+    while (!(hw->fr & UART_UARTFR_RXFE_BITS))
+    {
+        // Read the full 32-bit DR: bits 11:8 carry the receive status, and OE
+        // is the loss mode that actually happens if this ISR is ever masked
+        // for longer than the FIFO holds. Without this, rx_overrun == 0 would
+        // wrongly read as "no bytes lost".
+        const uint32_t dr = hw->dr;
+        if (dr & UART_UARTDR_OE_BITS)
+        {
+            rx_hw_overrun++;
+        }
+
+        // Full. Keep draining the FIFO — leaving bytes in it only converts a
+        // ring overrun into a hardware overrun, and loses the same data.
+        if ((rx_head - rx_tail) >= rx_ring_bytes)
+        {
+            rx_overrun++;
+            continue;
+        }
+
+        rx_buf[rx_head & rx_ring_mask] = static_cast<uint8_t>(dr);
+        rx_head++;
+        pushed++;
+    }
+
+    if (pushed != 0)
+    {
+        // Retire the oldest record rather than dropping the newest: an
+        // unstampable byte is recoverable (the frame is declined), whereas
+        // losing the record for bytes still in the ring is not.
+        if ((rx_batch_head - rx_batch_tail) >= rx_batch_slots)
+        {
+            rx_batch_tail++;
+        }
+        RxBatch& b = rx_batch[rx_batch_head & rx_batch_mask];
+        b.first_pos = batch_first;
+        b.count = pushed;
+        b.t_entry_us = now;
+        rx_batch_head++;
+    }
+
+    hw->icr = UART_UARTICR_RXIC_BITS | UART_UARTICR_RTIC_BITS;
+}
+
+// Arrival time of the byte at free-running ring position `pos`, back-dated
+// within its batch. Returns false if no live record covers it.
+bool arrival_of(uint32_t pos, uint64_t& out)
+{
+    for (uint32_t i = rx_batch_tail; i != rx_batch_head; i++)
+    {
+        const RxBatch& b = rx_batch[i & rx_batch_mask];
+        const uint32_t off = pos - b.first_pos;
+        if (off < b.count)
+        {
+            out = b.t_entry_us - wire_time_us(b.count - 1 - off);
+            return true;
+        }
+    }
+    return false;
+}
 
 inline uint32_t tx_used_unsafe()
 {
@@ -103,12 +261,6 @@ template <typename PackFn> bool pack_and_push(PackFn pack)
     const bool ok = push_unsafe(scratch, n);
     taskEXIT_CRITICAL();
     return ok;
-}
-
-// Microseconds to clock n bytes out at 8N1 (10 bits per byte).
-constexpr uint64_t wire_time_us(uint16_t n)
-{
-    return (static_cast<uint64_t>(n) * 10u * 1000000u) / board::cmd_baud;
 }
 
 // Emit the deferred TIMESYNC response. TX task only.
@@ -275,6 +427,16 @@ void dispatch(const mavlink_message_t* m)
         mavlink_msg_lawn_timesync_decode(m, &ts);
         if (ts.t2_us == 0) // a request, not somebody else's response
         {
+            // A t2 we cannot vouch for is worse than no answer: IF-0001 §7.4
+            // fits offset and skew by regression, so one bad sample biases the
+            // model rather than being averaged out, and nothing downstream can
+            // tell it happened. Decline; the peer retries.
+            if (!rx_frame_start_valid)
+            {
+                sync_declined++;
+                break;
+            }
+
             // Hand it to the TX task. Answering inline would block the only
             // reader of the RX FIFO for longer than the FIFO holds.
             taskENTER_CRITICAL();
@@ -311,6 +473,26 @@ bool init()
     uart_set_format(board::cmd_uart(), 8, 1, UART_PARITY_NONE);
     uart_set_fifo_enabled(board::cmd_uart(), true);
 
+    // RX interrupt. The FIFO stays enabled — it is what absorbs the burst
+    // between interrupts — but the trigger drops to 1/8 (4 of 32 bytes) so a
+    // frame is observed early rather than at half-full, and RTIM is enabled so
+    // a burst that stops below the trigger is not stranded there.
+    //
+    // Only RX is enabled. TX remains task-driven: link.hpp's ownership rule
+    // makes the TX task the sole writer, and an ISR that also wrote would
+    // break it.
+    hw_write_masked(&uart_get_hw(board::cmd_uart())->ifls,
+                    0u << UART_UARTIFLS_RXIFLSEL_LSB,
+                    UART_UARTIFLS_RXIFLSEL_BITS);
+    uart_get_hw(board::cmd_uart())->imsc =
+        UART_UARTIMSC_RXIM_BITS | UART_UARTIMSC_RTIM_BITS;
+
+    // Arms on the calling core's NVIC — core 0, since this runs from main()
+    // before the scheduler starts. See the ring's comment on why that matters.
+    const uint irq = UART_IRQ_NUM(board::cmd_uart());
+    irq_set_exclusive_handler(irq, on_cmd_uart_rx);
+    irq_set_enabled(irq, true);
+
     // TP-0001 D2: uart_set_baudrate clamps and reports nothing, so an
     // over-request silently becomes clk_peri/16. UART framing tolerates roughly
     // 2% total ACROSS BOTH ENDS, so spending it all here would leave the Pi
@@ -325,14 +507,26 @@ bool init()
 
 void rx_poll()
 {
-    while (uart_is_readable(board::cmd_uart()))
+    // Consumes the ring the UART ISR fills. Does NOT touch the UART itself:
+    // two readers of one FIFO would race, and the ISR is the reader.
+    while (rx_tail != rx_head)
     {
-        const uint8_t c = static_cast<uint8_t>(uart_get_hw(board::cmd_uart())->dr);
+        const uint32_t pos = rx_tail; // free-running; masked only at index
+        const uint8_t c = rx_buf[pos & rx_ring_mask];
 
         if (rx_status.parse_state == MAVLINK_PARSE_STATE_IDLE)
         {
-            rx_frame_start_us = time_us_64();
+            // This byte opens a frame. Ask for ITS arrival time rather than
+            // assuming the most recent stamp describes it — every byte the ISR
+            // took is covered by a batch record until that record is retired.
+            rx_frame_start_valid = arrival_of(pos, rx_frame_start_us);
         }
+
+        // Advanced only after the arrival lookup: the ISR retires batch records
+        // by age, not by consumption, but it will not overwrite ring bytes the
+        // task has not yet passed. Advancing first would let a full ring's
+        // worth of new data land on top of `pos` mid-lookup.
+        rx_tail = pos + 1;
 
         if (mavlink_parse_char(MAVLINK_COMM_0, c, &rx_msg, &rx_status))
         {
@@ -508,6 +702,21 @@ bool send_fault_event(uint8_t code, uint8_t nav_state, bool latched)
 uint32_t tx_dropped()
 {
     return tx_drop;
+}
+
+uint32_t rx_overrun_bytes()
+{
+    return rx_overrun;
+}
+
+uint32_t rx_hw_overrun_bytes()
+{
+    return rx_hw_overrun;
+}
+
+uint32_t sync_declined_count()
+{
+    return sync_declined;
 }
 
 uint32_t tx_peak_bytes()

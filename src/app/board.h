@@ -40,7 +40,19 @@ inline uart_inst_t* console_uart()
 {
     return uart1;
 }
-constexpr uint console_tx_pin = 20; // only free UART1 pair on the Pico 2 header
+// Moved 20 -> 8 on 2026-09-08. GP20 is I2C0 SDA as well as UART1 TX, and the
+// LSM6DSOX is soldered to GP20/21, so the console had to give the pin up.
+//
+// UART1 TX exists only on GP4, GP8, GP20 and GP24; GP24 is not brought out on
+// the Pico 2 header, and GP4/GP5 are the right-motor direction pins. GP8 was
+// left_backward_pin, which is a plain GPIO output to the TB6612 with no
+// special-function requirement, so it moved to GP9 (free, and the adjacent
+// header pin) and the console took GP8. That keeps the console on a HARDWARE
+// UART, which matters: IF-0001 §2 keeps it for being readable before any stack
+// is initialised, during a panic, before USB enumerates. A PIO console would
+// have coupled the debug channel to the same block that drives PWM and the
+// encoders — least trustworthy exactly when debugging a PIO fault.
+constexpr uint console_tx_pin = 8;
 constexpr uint console_baud = 115200;
 
 // Scope pin. Toggled once per control-loop iteration: TP-0001 Phase 2 needs
