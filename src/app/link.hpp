@@ -63,6 +63,13 @@ uint32_t tx_peak_bytes();
 // was fast.
 uint32_t rx_overrun_bytes();
 
+// Bytes the UART itself lost, reported by the OE status bit alongside the data.
+// Distinct from rx_overrun_bytes(): that one means the RING was full, this one
+// means the ISR did not run in time — which is what happens if interrupts are
+// masked for longer than the 32-byte FIFO holds (320 us at 1 Mbaud). Without
+// this, a zero from rx_overrun_bytes() would wrongly read as "nothing lost".
+uint32_t rx_hw_overrun_bytes();
+
 // TIMESYNC requests declined because the frame's arrival stamp could not be
 // vouched for (two frames arrived without the RX ring draining between them).
 // Declining biases nothing; answering from a stale t2 would. Nonzero here means

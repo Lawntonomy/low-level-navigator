@@ -331,6 +331,17 @@ int main()
     watchdog_enable(rt::watchdog_timeout_ms, true);
 
     log_console::write_blocking("[boot] starting scheduler\r\n");
+
+    // Same trap as after safety::init(), and it matters more now. Every
+    // taskENTER_CRITICAL() above — inside link::init()'s console write, inside
+    // each xTaskCreate — masks interrupts, and the SMP vTaskExitCritical does
+    // not unmask while xSchedulerRunning is false. The command UART's RX
+    // interrupt is armed by link::init(), so without this it stays masked
+    // through the write_blocking above: 27 bytes at 115200 is 2.3 ms, against a
+    // 32-byte RX FIFO that overflows in 320 us at 1 Mbaud. A peer already
+    // transmitting would lose ~230 bytes in hardware before the first task ran.
+    portENABLE_INTERRUPTS();
+
     vTaskStartScheduler();
 
     halt("[FATAL] scheduler returned\r\n");

@@ -60,43 +60,90 @@ PendingSync pending_sync;
 //
 // 512 bytes is 16x the UART's 32-byte FIFO and 5.12 ms of airtime at 1 Mbaud,
 // against a 1 ms task period — so the ring, not the FIFO, absorbs a burst.
+//
+// head and tail are FREE-RUNNING and masked only at index time. Storing masked
+// positions would let a stale batch record alias onto a byte 512 arrivals later
+// and be reported as its arrival time; free-running counters make that
+// impossible, and incidentally make all 512 bytes usable rather than 511.
 constexpr uint32_t rx_ring_bytes = 512;
 constexpr uint32_t rx_ring_mask = rx_ring_bytes - 1;
 static_assert((rx_ring_bytes & rx_ring_mask) == 0, "ring must be a power of two");
 
 uint8_t rx_buf[rx_ring_bytes];
-volatile uint32_t rx_head;    // written by the ISR only
-volatile uint32_t rx_tail;    // written by the task only
-volatile uint32_t rx_overrun; // bytes lost because the ring was full
+volatile uint32_t rx_head;        // written by the ISR only, free-running
+volatile uint32_t rx_tail;        // written by the task only, free-running
+volatile uint32_t rx_overrun;     // bytes lost because the RING was full
+volatile uint32_t rx_hw_overrun;  // bytes lost in the UART's own FIFO (OE)
 
-// Arrival stamp for the first byte of a burst, and the ring position it belongs
-// to, so the task can tell WHICH byte it describes rather than assuming.
-volatile uint64_t rx_burst_us;
-volatile uint32_t rx_burst_pos;
-volatile bool rx_burst_stamped;
+// Arrival records, one per ISR invocation.
+//
+// **Not one per burst.** A per-burst stamp would describe only the first frame
+// of each burst, and at IF-0001 §6 rates the Pi emits HEARTBEAT (21 B on the
+// wire), LAWN_DRIVE_CMD (16 B) and LAWN_TIMESYNC (37 B) from one loop pass —
+// 74 bytes, 740 us at 1 Mbaud, comfortably inside one 1 ms poll. The heartbeat
+// would open every burst and the sync request would never be stampable, so
+// every sync exchange would be declined and the ADR-0007 clock model would
+// never converge. link-stub/pi/link_stub.py:196-222 sends exactly that way.
+//
+// 32 records covers a 1 ms poll at 1 Mbaud even at the 4-byte trigger level
+// (100 bytes / 4 = 25 invocations). Overflow degrades to "no stamp", never to
+// a wrong one.
+struct RxBatch
+{
+    uint32_t first_pos; // free-running ring position of this batch's first byte
+    uint32_t count;
+    uint64_t t_entry_us; // time_us_64() at ISR entry
+};
+
+constexpr uint32_t rx_batch_slots = 32;
+constexpr uint32_t rx_batch_mask = rx_batch_slots - 1;
+static_assert((rx_batch_slots & rx_batch_mask) == 0, "must be a power of two");
+
+RxBatch rx_batch[rx_batch_slots];
+volatile uint32_t rx_batch_head; // ISR only, free-running
+volatile uint32_t rx_batch_tail; // task only, free-running
+
+// Microseconds to clock n bytes at 8N1 (10 bits per byte). Used both to
+// back-date an arrival in the ISR and to forward-date t3 in emit_timesync();
+// defined up here because the ISR is the earlier caller.
+constexpr uint64_t wire_time_us(uint32_t bytes)
+{
+    return (static_cast<uint64_t>(bytes) * 10ull * 1000000ull) / board::cmd_baud;
+}
 
 // Timestamp of the byte that opened the frame being parsed, and whether it can
 // be trusted.
 //
 // IF-0001 §7.4 requires t2 at the start-bit edge, captured in hardware. This is
-// the moment the UART interrupt observed the first byte of a burst instead.
-// TP-0001 T4.1's table puts that in the **±25 µs** class, dominated by FIFO
-// trigger-level jitter — against the **±1 ms** class the previous task-polled
-// version sat in, which the same table marks FORBIDDEN and labels "the trap".
+// the ISR's entry time BACK-DATED by the wire time of the bytes that preceded
+// this one in the same batch.
 //
-// T4.1's ±2 µs class still needs a pin-edge capture (GPIO IRQ or PIO). That is
-// deliberately not done here: it fixes the stamp but not the FIFO overrun this
-// change also fixes, and it needs an arm/disarm dance to avoid one interrupt
-// per data edge. Add it if the clock-residual measurement (ADR-0009's "single
-// most important bench measurement") shows the fit is sync-limited.
+// The back-dating is not cosmetic. The RX trigger is 4 bytes (see init), so an
+// uncorrected ISR-entry stamp is ~40 us LATE at 1 Mbaud — and uniformly so.
+// §7.4 computes offset = ((t2 - t1) + (t3 - t4)) / 2, which turns a uniform
+// +40 us on t2 into a +20 us one-sided offset BIAS. Its min-filter cannot
+// remove that: a constant lateness raises every sample's measured delay
+// equally, so the same samples survive the filter and carry the bias into the
+// regression. Jitter averages out; bias does not. T4.1's "±25 us class" figure
+// describes symmetric jitter, which this was not.
 //
-// `valid` is false when a frame began on a byte whose burst stamp had already
-// been consumed — i.e. two frames arrived without the ring draining between
-// them. A TIMESYNC answered from a stale t2 corrupts the fit silently, so the
+// Residual error after back-dating is bounded by the drain duration — bytes
+// that landed in the FIFO *during* the drain arrived after t_entry and are
+// back-dated slightly too far. A full 32-byte drain is ~6 us at 150 MHz, so
+// that residual is under 10 us and, unlike the 40 us it replaces, it is not
+// one-signed across trigger levels.
+//
+// T4.1's ±2 us class still needs a pin-edge capture (GPIO IRQ or PIO). Add it
+// if the clock-residual measurement (ADR-0009's "single most important bench
+// measurement") shows the fit is sync-limited.
+//
+// `valid` is false when the batch record covering the frame's first byte has
+// already been retired — the ring outran the record buffer. A TIMESYNC answered
+// from a stamp that is not this frame's corrupts the fit silently, so the
 // response is declined instead and the peer retries.
 uint64_t rx_frame_start_us;
 bool rx_frame_start_valid;
-volatile uint32_t sync_declined; // TIMESYNC requests dropped for a stale t2
+volatile uint32_t sync_declined; // TIMESYNC requests dropped for an unknown t2
 
 // UART RX interrupt. Drains the hardware FIFO into the ring so that FIFO
 // residency is bounded by interrupt latency rather than by the 1 ms task
@@ -106,39 +153,69 @@ void on_cmd_uart_rx()
 {
     uart_hw_t* const hw = uart_get_hw(board::cmd_uart());
 
-    // Taken once, at ISR entry, before any FIFO read: this is the closest
-    // observation of the burst's arrival available without a pin-edge capture.
     const uint64_t now = time_us_64();
-
-    // Empty *before* this batch means the next byte pushed opens a new burst.
-    bool opens_burst = (rx_head == rx_tail);
+    const uint32_t batch_first = rx_head;
+    uint32_t pushed = 0;
 
     while (!(hw->fr & UART_UARTFR_RXFE_BITS))
     {
-        const uint8_t c = static_cast<uint8_t>(hw->dr);
-        const uint32_t next = (rx_head + 1) & rx_ring_mask;
+        // Read the full 32-bit DR: bits 11:8 carry the receive status, and OE
+        // is the loss mode that actually happens if this ISR is ever masked
+        // for longer than the FIFO holds. Without this, rx_overrun == 0 would
+        // wrongly read as "no bytes lost".
+        const uint32_t dr = hw->dr;
+        if (dr & UART_UARTDR_OE_BITS)
+        {
+            rx_hw_overrun++;
+        }
 
         // Full. Keep draining the FIFO — leaving bytes in it only converts a
         // ring overrun into a hardware overrun, and loses the same data.
-        if (next == rx_tail)
+        if ((rx_head - rx_tail) >= rx_ring_bytes)
         {
             rx_overrun++;
             continue;
         }
 
-        if (opens_burst)
-        {
-            rx_burst_us = now;
-            rx_burst_pos = rx_head;
-            rx_burst_stamped = true;
-            opens_burst = false;
-        }
+        rx_buf[rx_head & rx_ring_mask] = static_cast<uint8_t>(dr);
+        rx_head++;
+        pushed++;
+    }
 
-        rx_buf[rx_head] = c;
-        rx_head = next;
+    if (pushed != 0)
+    {
+        // Retire the oldest record rather than dropping the newest: an
+        // unstampable byte is recoverable (the frame is declined), whereas
+        // losing the record for bytes still in the ring is not.
+        if ((rx_batch_head - rx_batch_tail) >= rx_batch_slots)
+        {
+            rx_batch_tail++;
+        }
+        RxBatch& b = rx_batch[rx_batch_head & rx_batch_mask];
+        b.first_pos = batch_first;
+        b.count = pushed;
+        b.t_entry_us = now;
+        rx_batch_head++;
     }
 
     hw->icr = UART_UARTICR_RXIC_BITS | UART_UARTICR_RTIC_BITS;
+}
+
+// Arrival time of the byte at free-running ring position `pos`, back-dated
+// within its batch. Returns false if no live record covers it.
+bool arrival_of(uint32_t pos, uint64_t& out)
+{
+    for (uint32_t i = rx_batch_tail; i != rx_batch_head; i++)
+    {
+        const RxBatch& b = rx_batch[i & rx_batch_mask];
+        const uint32_t off = pos - b.first_pos;
+        if (off < b.count)
+        {
+            out = b.t_entry_us - wire_time_us(b.count - 1 - off);
+            return true;
+        }
+    }
+    return false;
 }
 
 inline uint32_t tx_used_unsafe()
@@ -184,12 +261,6 @@ template <typename PackFn> bool pack_and_push(PackFn pack)
     const bool ok = push_unsafe(scratch, n);
     taskEXIT_CRITICAL();
     return ok;
-}
-
-// Microseconds to clock n bytes out at 8N1 (10 bits per byte).
-constexpr uint64_t wire_time_us(uint16_t n)
-{
-    return (static_cast<uint64_t>(n) * 10u * 1000000u) / board::cmd_baud;
 }
 
 // Emit the deferred TIMESYNC response. TX task only.
@@ -440,29 +511,22 @@ void rx_poll()
     // two readers of one FIFO would race, and the ISR is the reader.
     while (rx_tail != rx_head)
     {
-        const uint32_t pos = rx_tail;
-        const uint8_t c = rx_buf[pos];
+        const uint32_t pos = rx_tail; // free-running; masked only at index
+        const uint8_t c = rx_buf[pos & rx_ring_mask];
 
         if (rx_status.parse_state == MAVLINK_PARSE_STATE_IDLE)
         {
-            // This byte opens a frame. It carries a trustworthy arrival time
-            // only if it is the byte the ISR actually stamped.
-            if (rx_burst_stamped && rx_burst_pos == pos)
-            {
-                rx_frame_start_us = rx_burst_us;
-                rx_frame_start_valid = true;
-                rx_burst_stamped = false; // consumed; the next burst re-arms it
-            }
-            else
-            {
-                // A frame began without the ring draining first, so the stamp
-                // on record belongs to an earlier byte. Say so rather than
-                // answer a sync exchange from it.
-                rx_frame_start_valid = false;
-            }
+            // This byte opens a frame. Ask for ITS arrival time rather than
+            // assuming the most recent stamp describes it — every byte the ISR
+            // took is covered by a batch record until that record is retired.
+            rx_frame_start_valid = arrival_of(pos, rx_frame_start_us);
         }
 
-        rx_tail = (pos + 1) & rx_ring_mask;
+        // Advanced only after the arrival lookup: the ISR retires batch records
+        // by age, not by consumption, but it will not overwrite ring bytes the
+        // task has not yet passed. Advancing first would let a full ring's
+        // worth of new data land on top of `pos` mid-lookup.
+        rx_tail = pos + 1;
 
         if (mavlink_parse_char(MAVLINK_COMM_0, c, &rx_msg, &rx_status))
         {
@@ -643,6 +707,11 @@ uint32_t tx_dropped()
 uint32_t rx_overrun_bytes()
 {
     return rx_overrun;
+}
+
+uint32_t rx_hw_overrun_bytes()
+{
+    return rx_hw_overrun;
 }
 
 uint32_t sync_declined_count()

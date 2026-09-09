@@ -15,8 +15,15 @@ void pio_pwm_set_period(PIO pio, uint sm, uint32_t period);
 // **A dropped write is NOT fail-safe.** pwm.pio does `pull noblock`, which
 // copies X back into the OSR when the FIFO is empty, so the state machine holds
 // its PREVIOUS level indefinitely. A dropped write therefore means "keep doing
-// what you were doing", not "stop". Any caller on a stop path must check the
-// return value; motors::safe_state() is that caller once PIO PWM is attached.
+// what you were doing", not "stop", so any caller on a stop path must check it.
+//
+// **No such caller exists yet, and a stop path must not be built on this.**
+// motors::safe_state() zeroes the PWM pins with gpio_put(), which does nothing
+// once pio_gpio_init() has muxed the pad to PIO — so when PIO PWM is attached,
+// safe_state() will silently fail to stop the wheels. Fixing that needs
+// safe_state() to act THROUGH pio (disable the state machine, or reclaim the
+// pad with gpio_set_function(GPIO_FUNC_SIO) first), and it must not depend on
+// this function succeeding, because a refused write holds the previous duty.
 bool pio_pwm_set_level(PIO pio, uint sm, uint32_t level);
 
 // Writes refused because the TX FIFO was full, since boot. Monotonic.
