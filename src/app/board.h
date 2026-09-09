@@ -41,6 +41,18 @@ inline uart_inst_t* console_uart()
     return uart1;
 }
 constexpr uint console_tx_pin = 20; // only free UART1 pair on the Pico 2 header
+// GP21 is the matching UART1 RX. Reserved rather than configured: log.cpp sets
+// the function on the TX pin only, and an unwired, undriven Bank 0 pad is the
+// RP2350-E9 leakage case, so nothing should put this pin in the harness until
+// something actually reads it.
+//
+// Naming it here is not decoration. GP20/21 is the ONLY UART1 pair with both
+// directions exposed (TX: GP4, GP8, GP20, GP24; RX: GP5, GP9, GP21, GP25 --
+// GP24/25 are not brought out, GP4/GP5 are motor direction pins), so this is
+// the pin any future console RX has to use. It was briefly reassigned to the
+// IMU in September 2026; see research/imu-driver-findings.md §1 for why that
+// was undone rather than worked around.
+constexpr uint console_rx_pin = 21;
 constexpr uint console_baud = 115200;
 
 // Scope pin. Toggled once per control-loop iteration: TP-0001 Phase 2 needs
