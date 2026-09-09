@@ -172,6 +172,11 @@ bool imu_i2c::readReg(uint8_t deviceAddr, uint8_t reg, uint8_t* dst, std::size_t
            static_cast<int>(len);
 }
 
+// Upper bound on bytes the RX FIFO can be holding. The DW_apb_i2c RX and TX
+// FIFOs are both 16 deep on RP2350; init() verifies the TX depth directly, and
+// this is the same number used as a drain ceiling.
+static constexpr std::size_t fifo_depth_guard = 16;
+
 bool imu_i2c::startBurstRead()
 {
     if (!ready || rx_chan < 0)
@@ -212,8 +217,21 @@ bool imu_i2c::startBurstRead()
     // A leftover byte from an aborted transaction would be consumed as byte 0
     // of this sample and shift all twelve, turning a recoverable fault into
     // silently wrong gyro and accel values.
-    while (i2c_get_read_available(i2c0) > 0)
+    // Bounded, and the bound is not decoration. Under the rt.h decision this
+    // function is also called from the control task on core 1 as the stall
+    // recovery, so an unbounded loop here is an unbounded loop on the path that
+    // feeds the watchdog: the control task would spin, watchdog_update() would
+    // never be reached, and the 100 ms reset returns the pads to a state where
+    // the TB6612 reads STBY high with the direction pins low -- coasting, not
+    // stopped. The RX FIFO is the same depth as the TX FIFO, so anything beyond
+    // that many bytes means the peripheral is not in the state this code thinks
+    // it is; fail the call rather than spin.
+    for (std::size_t drained = 0; i2c_get_read_available(i2c0) > 0; ++drained)
     {
+        if (drained >= fifo_depth_guard)
+        {
+            return false;
+        }
         (void)hw->data_cmd;
     }
 
