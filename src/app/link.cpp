@@ -494,6 +494,20 @@ bool send_link_stats()
         });
 }
 
+// safety::Fault and LAWN_FAULT_CODE are independent enums that happen to agree.
+// link.cpp casts one straight into the other at line ~453, so a value added to
+// either without the other silently reports the wrong fault to the Pi -- and a
+// wrong fault code is worse than none, because it sends the operator looking in
+// the wrong place. These cost nothing and fail the build instead.
+static_assert(static_cast<uint8_t>(safety::Fault::none) == LAWN_FAULT_NONE);
+static_assert(static_cast<uint8_t>(safety::Fault::cmd_timeout) == LAWN_FAULT_CMD_TIMEOUT);
+static_assert(static_cast<uint8_t>(safety::Fault::link_degraded) == LAWN_FAULT_LINK_DEGRADED);
+static_assert(static_cast<uint8_t>(safety::Fault::wheel_stall) == LAWN_FAULT_WHEEL_STALL);
+static_assert(static_cast<uint8_t>(safety::Fault::wheel_invalid) == LAWN_FAULT_WHEEL_INVALID);
+static_assert(static_cast<uint8_t>(safety::Fault::dir_mismatch) == LAWN_FAULT_DIR_MISMATCH);
+static_assert(static_cast<uint8_t>(safety::Fault::tilt) == LAWN_FAULT_TILT);
+static_assert(static_cast<uint8_t>(safety::Fault::init_failed) == LAWN_FAULT_INIT_FAILED);
+
 bool send_fault_event(uint8_t code, uint8_t nav_state, bool latched)
 {
     const uint64_t now = time_us_64();

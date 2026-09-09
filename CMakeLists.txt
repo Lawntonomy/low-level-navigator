@@ -48,6 +48,7 @@ target_sources(
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/safety.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/hardware_drivers/encoder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/hardware_drivers/imu_i2c.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/hardware_drivers/lsm6dsox.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/hardware_drivers/pwm.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/utility/logger.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/high_level_drivers/pid.cpp
