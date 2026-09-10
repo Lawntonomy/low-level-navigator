@@ -27,6 +27,7 @@ add_executable(lln_tests
     test_encoder_math.cpp
     test_bootloader.cpp
     test_imu_stall.cpp
+    test_imu_sample.cpp
     stubs/logger_stub.cpp
     ${LLN_SRC_DIR}/high_level_drivers/pid.cpp
 )

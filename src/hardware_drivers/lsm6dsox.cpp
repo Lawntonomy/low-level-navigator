@@ -61,6 +61,20 @@ constexpr uint8_t cfg_ctrl1_xl = 0x58;
 // 208 Hz (ODR 0101), +-500 dps (FS_G 01). See the CAL-6 note above.
 constexpr uint8_t cfg_ctrl2_g = 0x54;
 
+// INT1_DRDY_XL (bit 0) and INT1_DRDY_G (bit 1). The pin is the OR of the two
+// ready flags; with both sensors on the same 208 Hz ODR that is one edge per
+// sample, which diagnostics/imu-probe confirmed on this board with this exact
+// value -- 209 edges against 210 drains in one second, 2026-09-09.
+//
+// COUNTER_BDR_REG1 (0x0B) bit 7, DRDY_PULSED, is left at its default and that
+// is a decision. Pulsed mode would decouple the edge from the read and let the
+// pin keep producing edges while nobody consumes them, degrading a stalled
+// reader into a stream of silently stale samples. Latched turns the same fault
+// into a stopped stream: loud, unambiguous, impossible to mistake for working.
+// An estimator fed confidently wrong attitude is worse than one fed nothing
+// (issue #47, decided 2026-09-09).
+constexpr uint8_t cfg_int1_ctrl = 0x03;
+
 struct RegWrite
 {
     uint8_t reg;
@@ -130,5 +144,20 @@ bool lsm6dsox::configure()
     }
 
     Log::info(category, "lsm6dsox configured");
+    return true;
+}
+
+bool lsm6dsox::enableDataReadyInterrupt()
+{
+    // The last i2c transaction main() is allowed to issue. See the ordering
+    // constraint in the header; there is no read-back for the reason given
+    // there.
+    if (!imu_i2c::writeReg(lsm6dsox::device_addr, lsm6dsox::reg_int1_ctrl, cfg_int1_ctrl))
+    {
+        Log::error(category, "INT1_CTRL");
+        return false;
+    }
+
+    Log::info(category, "lsm6dsox data-ready interrupt enabled");
     return true;
 }

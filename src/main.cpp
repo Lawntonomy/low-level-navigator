@@ -38,6 +38,7 @@
 #include "app/safety.hpp"
 
 #include "hardware_drivers/encoder.hpp"
+#include "hardware_drivers/imu_drdy.hpp"
 #include "hardware_drivers/imu_i2c.hpp"
 #include "hardware_drivers/lsm6dsox.hpp"
 
@@ -319,7 +320,19 @@ int main()
     // it, while a false negative is a machine that runs a whole session
     // believing it has a tilt sensor it does not have, with WHO_AM_I checked
     // once and no later chance to notice.
-    if (!imu_i2c::init() || !lsm6dsox::configure())
+    // Steps 1 and 2 of rt.h's arming order, which is not interchangeable:
+    // transport and device configuration, then the spinlocks and both interrupt
+    // handlers. Step 3, the INT1_CTRL write that actually starts the stream, is
+    // deliberately far below, immediately before the scheduler.
+    //
+    // imu_drdy::init() must run HERE, on core 0, from main(). Interrupt
+    // affinity on RP2350 is decided by where the arming call runs -- both the
+    // IO_BANK0 enable and the NVIC enable are per core -- and core 0 arming is
+    // what guarantees the control task on core 1 cannot be preempted by INT1 or
+    // by the IMU's DMA channel.
+    const bool imu_ready = imu_i2c::init() && lsm6dsox::configure() && imu_drdy::init();
+
+    if (!imu_ready)
     {
         log_console::write_blocking("[boot] IMU init FAILED - latching fault, will not arm\r\n");
         safety::raise_fault(safety::Fault::init_failed);
@@ -359,6 +372,29 @@ int main()
     // halted. Convenient on the bench and a hole in production: proposed
     // SAF-17 would require it disabled in non-development builds.
     watchdog_enable(rt::watchdog_timeout_ms, true);
+
+    // Step 3, and it is LAST for a reason that is easy to undo by tidying.
+    //
+    // Writing INT1_CTRL starts the data-ready stream. Everything above it that
+    // touches the IMU busy-waits on i2c0 from main(), and an edge arriving
+    // mid-write would start an interrupt-driven burst on a bus a blocking call
+    // is already driving -- SCL held low, a bus wedged at boot. Nothing may be
+    // added between here and vTaskStartScheduler() that touches i2c0. The only
+    // thing that follows is one blocking write to uart1, which does not.
+    //
+    // A failure here is the same class of fault as a failed WHO_AM_I: the part
+    // is configured but silent, so SAF-25's argument for refusing to arm holds
+    // unchanged.
+    if (imu_ready && !lsm6dsox::enableDataReadyInterrupt())
+    {
+        log_console::write_blocking("[boot] IMU INT1 enable FAILED - latching fault\r\n");
+        safety::raise_fault(safety::Fault::init_failed);
+
+        // Same landmine as the IMU block above: raise_fault takes a critical
+        // section and the SMP vTaskExitCritical only unmasks once the scheduler
+        // is running, which it is not yet.
+        portENABLE_INTERRUPTS();
+    }
 
     log_console::write_blocking("[boot] starting scheduler\r\n");
     vTaskStartScheduler();
