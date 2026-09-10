@@ -219,6 +219,32 @@ namespace
         if (now >= next_stats)
         {
             link::send_link_stats();
+
+            // One console line per second, and it is the difference between this
+            // firmware being observable and not.
+            //
+            // Until now uart1 carried only boot banners, so watching it on a
+            // running board showed nothing -- correctly, and confusingly. Every
+            // number here is otherwise invisible: the IMU stream simply produces
+            // fewer samples, or none, and no other channel says why. edges
+            // against published is the headline; a gap between them localises the
+            // loss to a specific counter rather than leaving "it is not working".
+            //
+            // counters() is lock-free on purpose (review finding F5): taking the
+            // sample lock here would mask INT1 on core 0, which is where this
+            // task runs, and blow the capture budget the 0x00 priority exists to
+            // protect. peekSample() is deliberately NOT called for the same
+            // reason -- it takes the blocking lock.
+            const imu_drdy::Counters ic = imu_drdy::counters();
+            log_console::write(
+                "S imu e=%lu p=%lu dup=%lu disc=%lu lkM=%lu lkC=%lu bsf=%lu | "
+                "con drop=%lu peak=%lu\r\n",
+                (unsigned long)ic.edges, (unsigned long)ic.published,
+                (unsigned long)ic.duplicate_completions, (unsigned long)ic.completion_discards,
+                (unsigned long)ic.burst_lock_misses, (unsigned long)ic.burst_lock_contended,
+                (unsigned long)ic.burst_start_failures, (unsigned long)log_console::dropped(),
+                (unsigned long)log_console::peak_bytes());
+
             next_stats = now + 1000000; // 1 Hz
         }
 

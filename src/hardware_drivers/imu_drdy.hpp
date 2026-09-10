@@ -29,7 +29,8 @@ namespace imu_drdy
 struct Counters
 {
     uint32_t edges = 0;                 // INT1 rising edges handled
-    uint32_t burst_lock_misses = 0;     // try-lock failed, so no burst was started
+    uint32_t burst_lock_misses = 0;     // try-lock failed repeatedly: reservation lost
+    uint32_t burst_lock_contended = 0;  // lock genuinely held by core 1's recovery read
     uint32_t burst_start_failures = 0;  // startBurstRead() refused
     uint32_t completion_discards = 0;   // completion could not be paired with its stamp
     uint32_t duplicate_completions = 0; // completion for an already-published stamp
@@ -60,6 +61,8 @@ bool takeSample(imu_sample::Sample* out);
 // only wants the timestamp.
 bool peekSample(imu_sample::Sample* out);
 
+// Lock-free. Safe to call from any task on either core; NOT from an interrupt
+// handler above configMAX_SYSCALL_INTERRUPT_PRIORITY, though nothing needs to.
 Counters counters();
 
 } // namespace imu_drdy
