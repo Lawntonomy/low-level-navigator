@@ -114,13 +114,13 @@ bool readWhoAmI(uint8_t* out)
 
 } // namespace
 
-bool lsm6dsox::configure()
+lsm6dsox::ConfigResult lsm6dsox::configure()
 {
     uint8_t who = 0;
     if (!readWhoAmI(&who))
     {
         Log::error(category, "WHO_AM_I mismatch or no response");
-        return false;
+        return ConfigResult::no_response;
     }
 
     // **SW_RESET first, and it is not hygiene -- it is what makes the warm-boot
@@ -153,7 +153,7 @@ bool lsm6dsox::configure()
                            lsm6dsox::ctrl3_c_sw_reset))
     {
         Log::error(category, "SW_RESET write failed");
-        return false;
+        return ConfigResult::sw_reset_write_failed;
     }
     for (unsigned waited = 0;; ++waited)
     {
@@ -161,7 +161,7 @@ bool lsm6dsox::configure()
         if (!imu_i2c::readReg(lsm6dsox::device_addr, lsm6dsox::reg_ctrl3_c, &ctrl3, 1))
         {
             Log::error(category, "SW_RESET poll failed");
-            return false;
+            return ConfigResult::sw_reset_poll_failed;
         }
         if ((ctrl3 & lsm6dsox::ctrl3_c_sw_reset) == 0)
         {
@@ -170,7 +170,7 @@ bool lsm6dsox::configure()
         if (waited >= sw_reset_poll_limit)
         {
             Log::error(category, "SW_RESET did not self-clear");
-            return false;
+            return ConfigResult::sw_reset_timeout;
         }
         sleep_ms(1);
     }
@@ -180,7 +180,7 @@ bool lsm6dsox::configure()
         if (!imu_i2c::writeReg(lsm6dsox::device_addr, w.reg, w.value))
         {
             Log::error(category, w.name);
-            return false;
+            return ConfigResult::config_write_failed;
         }
     }
 
@@ -196,7 +196,7 @@ bool lsm6dsox::configure()
         if (!imu_i2c::readReg(lsm6dsox::device_addr, w.reg, &got, 1) || got != w.value)
         {
             Log::error(category, w.name);
-            return false;
+            return ConfigResult::config_readback_failed;
         }
     }
 
@@ -209,11 +209,28 @@ bool lsm6dsox::configure()
     if (!imu_i2c::readReg(lsm6dsox::device_addr, lsm6dsox::reg_int1_ctrl, &int1, 1) || int1 != 0x00)
     {
         Log::error(category, "INT1_CTRL not clear after reset");
-        return false;
+        return ConfigResult::int1_not_clear;
     }
 
     Log::info(category, "lsm6dsox configured");
-    return true;
+    return ConfigResult::ok;
+}
+
+const char* lsm6dsox::describe(ConfigResult r)
+{
+    switch (r)
+    {
+    case ConfigResult::ok: return "ok";
+    case ConfigResult::no_response:
+        return "WHO_AM_I did not read 0x6C (sensor absent, unpowered, or wrong address)";
+    case ConfigResult::sw_reset_write_failed: return "SW_RESET write not ACKed";
+    case ConfigResult::sw_reset_poll_failed: return "CTRL3_C unreadable while polling SW_RESET";
+    case ConfigResult::sw_reset_timeout: return "SW_RESET never self-cleared";
+    case ConfigResult::config_write_failed: return "a CTRL register write was not ACKed";
+    case ConfigResult::config_readback_failed: return "a CTRL register read back wrong";
+    case ConfigResult::int1_not_clear: return "INT1_CTRL not 0x00 after reset";
+    }
+    return "unknown";
 }
 
 bool lsm6dsox::enableDataReadyInterrupt()
