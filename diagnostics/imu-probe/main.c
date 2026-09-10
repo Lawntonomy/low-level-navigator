@@ -103,7 +103,7 @@ static bool regRead(uint8_t addr, uint8_t reg, uint8_t* dst, size_t len)
     {
         return false;
     }
-    return i2c_read_timeout_us(i2c0, addr, dst, len, false, I2C_TIMEOUT_US) == (int) len;
+    return i2c_read_timeout_us(i2c0, addr, dst, len, false, I2C_TIMEOUT_US) == (int)len;
 }
 
 static bool regWrite(uint8_t addr, uint8_t reg, uint8_t val)
@@ -116,16 +116,11 @@ static const char* addrNote(uint8_t addr)
 {
     switch (addr)
     {
-    case 0x6A:
-        return "LSM6DSOX, ADAG open -- expected";
-    case 0x6B:
-        return "LSM6DSOX, but ADAG is BRIDGED";
-    case 0x1C:
-        return "LIS3MDL, ADM open -- expected";
-    case 0x1E:
-        return "LIS3MDL, but ADM is BRIDGED";
-    default:
-        return "unexpected -- not a device this board should carry";
+    case 0x6A: return "LSM6DSOX, ADAG open -- expected";
+    case 0x6B: return "LSM6DSOX, but ADAG is BRIDGED";
+    case 0x1C: return "LIS3MDL, ADM open -- expected";
+    case 0x1E: return "LIS3MDL, but ADM is BRIDGED";
+    default: return "unexpected -- not a device this board should carry";
     }
 }
 
@@ -303,7 +298,7 @@ int main(void)
             }
             for (unsigned a = 0; a < 6; a++)
             {
-                s[i][a] = (int16_t) ((uint16_t) raw[2 * a] | ((uint16_t) raw[2 * a + 1] << 8));
+                s[i][a] = (int16_t)((uint16_t)raw[2 * a] | ((uint16_t)raw[2 * a + 1] << 8));
             }
             samples++;
         }
@@ -391,13 +386,13 @@ int main(void)
         printf("\n[4] INT1 data-ready over 1 s (expect ~%d Hz, or ~%d if accel and gyro\n",
                CFG_ODR_HZ, 2 * CFG_ODR_HZ);
         printf("    data-ready do not coincide -- INT1 carries the OR of both)\n");
-        printf("      edges          %lu\n", (unsigned long) edges);
+        printf("      edges          %lu\n", (unsigned long)edges);
         if (stored > 1)
         {
-            printf("      period us      min %lu  mean %lu  max %lu\n", (unsigned long) gap_min,
-                   (unsigned long) gap_mean, (unsigned long) gap_max);
+            printf("      period us      min %lu  mean %lu  max %lu\n", (unsigned long)gap_min,
+                   (unsigned long)gap_mean, (unsigned long)gap_max);
             printf("      spread         %lu us (sensor ODR stability as seen at the pin; this\n",
-                   (unsigned long) (gap_max - gap_min));
+                   (unsigned long)(gap_max - gap_min));
             printf("                     bounds capture jitter from above, it is not capture\n");
             printf("                     jitter on its own)\n");
         }
