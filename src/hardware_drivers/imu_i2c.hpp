@@ -82,4 +82,12 @@ uint32_t burstRemaining();
 // back; read it only once burstBusy() is false, or bytes will be torn.
 const volatile uint8_t* burstBuffer();
 
+// The claimed RX DMA channel, or -1 before init() has succeeded.
+//
+// Exposed only so the piece that owns the completion interrupt can enable and
+// acknowledge it on this exact channel -- the channel is claimed dynamically,
+// so there is no constant to hard-code. Ownership does not move: nothing
+// outside this file may configure, trigger or abort it.
+int rxChannel();
+
 } // namespace imu_i2c

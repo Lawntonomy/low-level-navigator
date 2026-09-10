@@ -299,3 +299,8 @@ const volatile uint8_t* imu_i2c::burstBuffer()
 {
     return burst_buf;
 }
+
+int imu_i2c::rxChannel()
+{
+    return rx_chan;
+}
