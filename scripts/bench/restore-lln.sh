@@ -34,6 +34,7 @@ BENCH_RUN="$SCRIPT_DIR/bench-run.sh"
 repo_root="$(bench_repo_root)"
 cd "$repo_root"
 uf2="$repo_root/build/low-level-nav.uf2"
+cmd_port="${CMD_PORT:-/dev/ttyAMA2}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -58,10 +59,28 @@ echo "restore-lln: [1/2] copy"
 echo "restore-lln: [2/2] flash"
 if ! "$BENCH_RUN" restore-lln-flash \
     "~/picotool/picotool load -f -x -v ~/${PI_REMOTE_DIR}/low-level-nav.uf2"; then
-    echo "restore-lln: picotool could not reach the board. If a no-stdio image is" >&2
-    echo "             already resident, -f has nothing to talk to: use" >&2
-    echo "             scripts/enter-bootloader.py, or press BOOTSEL once." >&2
-    exit 1
+    # The fallback this script was missing. Without it, a lln -> lln reflash
+    # failed with a message telling the reader to do by hand what the other two
+    # bench scripts already do automatically -- and on 2026-09-10 that silently
+    # cost a console capture, because the board never rebooted and the empty log
+    # looked like a wiring fault.
+    echo "restore-lln: picotool found no device; asking the resident firmware to"
+    echo "             enter the bootloader over the command link"
+    "$BENCH_RUN" --local restore-lln-sync-bootloader \
+        "rsync -a --relative scripts/enter-bootloader.py mavlink/python ${host}:~/${PI_REMOTE_DIR}/"
+    if ! "$BENCH_RUN" restore-lln-enter-bootloader \
+        "~/link-stub-pi/.venv/bin/python3 -u ~/${PI_REMOTE_DIR}/scripts/enter-bootloader.py --port ${cmd_port}"; then
+        echo "restore-lln: could not reach the bootloader. REFUSED means armed --" >&2
+        echo "             disarm and re-run. Silence means the resident image speaks" >&2
+        echo "             neither USB stdio nor LAWN_ENTER_BOOTLOADER: press BOOTSEL." >&2
+        exit 1
+    fi
+    "$BENCH_RUN" restore-lln-wait-bootsel \
+        "for i in \$(seq 15); do lsusb | grep -q 2e8a:000f && break; sleep 1; done; lsusb | grep 2e8a" ||
+        { echo "restore-lln: BOOTSEL never enumerated. Press BOOTSEL and re-run." >&2; exit 1; }
+    "$BENCH_RUN" restore-lln-flash-bootsel \
+        "~/picotool/picotool load -x -v ~/${PI_REMOTE_DIR}/low-level-nav.uf2" ||
+        { echo "restore-lln: flash failed after reaching BOOTSEL." >&2; exit 1; }
 fi
 
 cat <<'NOTE'

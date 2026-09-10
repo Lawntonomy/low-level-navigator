@@ -78,7 +78,20 @@ volatile uint32_t completion_discards = 0;
 // instructions.
 constexpr unsigned burst_lock_attempts = 8;
 
-uint32_t burst_lock_contended = 0;
+volatile uint32_t burst_lock_contended = 0;
+
+// Mirrors of the two counters that live inside the published stream. Written
+// only by the DMA completion handler, read without a lock.
+//
+// Review finding F5: counters() used to take sample_lock for these, via the
+// PRIMASK-setting spin_lock_blocking(). That is correct on core 1 and wrong
+// anywhere else, because PRIMASK masks priority 0x00 -- and the caller is the
+// telemetry task, which rt.h pins to core 0. Masking INT1 for the length of a
+// lock acquisition blows the +-2 us capture budget that the whole 0x00 priority
+// choice exists to meet. Mirroring costs two stores per sample and removes the
+// lock from the read path entirely.
+volatile uint32_t published_mirror = 0;
+volatile uint32_t duplicates_mirror = 0;
 
 spin_lock_t* sample_lock = nullptr;
 spin_lock_t* burst_lock = nullptr;
@@ -300,7 +313,14 @@ void dmaHandler()
     // core 1 may spin for, by one INT1 handler.
     spin_lock_unsafe_blocking(sample_lock);
     stream.onBurstComplete(stamp_us, raw, sample_period_us);
+    const uint32_t pub = stream.published;
+    const uint32_t dup = stream.duplicates;
     spin_unlock_unsafe(sample_lock);
+
+    // Outside the lock: see the mirror note above. Single writer, so no ordering
+    // beyond the store is required.
+    published_mirror = pub;
+    duplicates_mirror = dup;
 }
 
 } // namespace
@@ -420,18 +440,16 @@ imu_drdy::Counters imu_drdy::counters()
         return c;
     }
 
-    // The four ISR counters are single-writer 32-bit words and are read without
-    // a lock; a snapshot torn across them is a diagnostic being off by one, not
-    // a decision being made on bad data. The two that live inside the stream
-    // share its lock because they must not be read while it is half-updated.
+    // No lock, deliberately -- every field is a single-writer 32-bit word and a
+    // snapshot torn across them is a diagnostic being off by one, not a decision
+    // made on bad data. Taking sample_lock here would mask INT1 on core 0, which
+    // is where the only caller runs (review finding F5).
     c.edges = edges;
     c.burst_lock_misses = burst_lock_misses;
+    c.burst_lock_contended = burst_lock_contended;
     c.burst_start_failures = burst_start_failures;
     c.completion_discards = completion_discards;
-
-    const uint32_t save = spin_lock_blocking(sample_lock);
-    c.duplicate_completions = stream.duplicates;
-    c.published = stream.published;
-    spin_unlock(sample_lock, save);
+    c.duplicate_completions = duplicates_mirror;
+    c.published = published_mirror;
     return c;
 }
