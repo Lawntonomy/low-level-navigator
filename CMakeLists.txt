@@ -47,6 +47,7 @@ target_sources(
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/log.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/safety.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/hardware_drivers/encoder.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/hardware_drivers/imu_drdy.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/hardware_drivers/imu_i2c.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/hardware_drivers/lsm6dsox.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/hardware_drivers/pwm.cpp
@@ -101,6 +102,11 @@ target_link_libraries(${PROJECT_NAME}
   hardware_uart
   # LSM6DSOX transport on i2c0 (src/hardware_drivers/imu_i2c.cpp).
   hardware_i2c
+  # The IMU data-ready path claims two dedicated hardware spinlocks rather than
+  # using taskENTER_CRITICAL (src/app/rt.h), and installs the INT1 and RX DMA
+  # completion handlers directly.
+  hardware_sync
+  hardware_irq
   FreeRTOS-Kernel-Heap4
   pico_stdlib
   hardware_pio
