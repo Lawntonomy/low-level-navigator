@@ -47,7 +47,7 @@ TEST(ImuStallCadence, NominalPeriodIsDerivedFromNominalOdr)
 TEST(ImuStallTimeout, TimeoutIsPeriodTimesCount)
 {
     EXPECT_EQ(imu_stall::stallTimeoutUs(kPeriodUs, 3), 3u * kPeriodUs);
-    EXPECT_EQ(imu_stall::stallTimeoutUs(kPeriodUs), imu_stall::stall_periods * kPeriodUs);
+    EXPECT_EQ(imu_stall::stallTimeoutUs(kPeriodUs, 1), kPeriodUs);
 }
 
 TEST(ImuStallTimeout, TimeoutSaturatesInsteadOfWrapping)
@@ -63,15 +63,15 @@ TEST(ImuStallTimeout, AnUnknownCadenceReadsAsStalled)
     // periodUs == 0 means the ODR was never established. The file's stated
     // policy is that the unsafe direction is a missed stall, so an unknown
     // cadence must not read as healthy.
-    EXPECT_EQ(imu_stall::stallTimeoutUs(0), 0u);
-    EXPECT_TRUE(imu_stall::isStalled(1000, 1000 - 1, imu_stall::stallTimeoutUs(0)));
+    EXPECT_EQ(imu_stall::stallTimeoutUs(0, 3), 0u);
+    EXPECT_TRUE(imu_stall::isStalled(1000, 1000 - 1, imu_stall::stallTimeoutUs(0, 3)));
 }
 
 // --- isStalled ------------------------------------------------------------
 
 TEST(ImuStallDetector, FreshStreamIsNotStalled)
 {
-    const uint32_t timeout = imu_stall::stallTimeoutUs(kPeriodUs);
+    const uint32_t timeout = imu_stall::stallTimeoutUs(kPeriodUs, 3);
     const uint64_t last = 5'000'000;
 
     EXPECT_FALSE(imu_stall::isStalled(last, last, timeout));
@@ -81,7 +81,7 @@ TEST(ImuStallDetector, FreshStreamIsNotStalled)
 
 TEST(ImuStallDetector, BoundaryIsInclusive)
 {
-    const uint32_t timeout = imu_stall::stallTimeoutUs(kPeriodUs);
+    const uint32_t timeout = imu_stall::stallTimeoutUs(kPeriodUs, 3);
     const uint64_t last = 5'000'000;
 
     EXPECT_FALSE(imu_stall::isStalled(last + timeout - 1, last, timeout));
@@ -91,7 +91,7 @@ TEST(ImuStallDetector, BoundaryIsInclusive)
 
 TEST(ImuStallDetector, LongSilenceIsStalled)
 {
-    const uint32_t timeout = imu_stall::stallTimeoutUs(kPeriodUs);
+    const uint32_t timeout = imu_stall::stallTimeoutUs(kPeriodUs, 3);
     // The failure this is really for: INT1 latched high, never re-armed, and
     // every DMA register still reporting a healthy idle channel.
     EXPECT_TRUE(imu_stall::isStalled(5'000'000 + 1'000'000, 5'000'000, timeout));
@@ -99,7 +99,7 @@ TEST(ImuStallDetector, LongSilenceIsStalled)
 
 TEST(ImuStallDetector, TimestampFromTheFutureDoesNotUnderflow)
 {
-    const uint32_t timeout = imu_stall::stallTimeoutUs(kPeriodUs);
+    const uint32_t timeout = imu_stall::stallTimeoutUs(kPeriodUs, 3);
     // An unguarded subtraction here reads as a ~584,000-year gap and trips the
     // timeout instantly on what is really a one-microsecond clock anomaly.
     EXPECT_FALSE(imu_stall::isStalled(1'000'000, 1'000'001, timeout));
@@ -110,7 +110,7 @@ TEST(ImuStallDetector, WorksAcrossThe32BitClockBoundary)
 {
     // The timestamps are 64-bit microseconds. A value past 2^32 must behave
     // exactly like any other, so nothing here can be narrowed to uint32.
-    const uint32_t timeout = imu_stall::stallTimeoutUs(kPeriodUs);
+    const uint32_t timeout = imu_stall::stallTimeoutUs(kPeriodUs, 3);
     const uint64_t last = 5'000'000'000; // ~83 minutes of uptime
 
     EXPECT_FALSE(imu_stall::isStalled(last + kPeriodUs, last, timeout));
@@ -162,6 +162,11 @@ TEST(ImuStallThreshold, DerivedFromWorstCasePeriodNotNominal)
     // sit strictly above it or it fires on a working sensor.
     EXPECT_GT(imu_stall::stall_timeout_us,
               imu_stall::worst_case_period_us + imu_stall::burst_delay_us);
+
+    // Pin the derived number itself, not only its shape. The comments in
+    // imu_stall.hpp said 11812 while the integer arithmetic gives 11808, and a
+    // formula-only assertion would not have caught that.
+    EXPECT_EQ(imu_stall::stall_timeout_us, 11808u);
 }
 
 TEST(ImuStallGaps, EachWholeSkippedPeriodIsOneLostSample)

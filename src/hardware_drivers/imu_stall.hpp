@@ -77,7 +77,7 @@ inline constexpr uint32_t nominal_period_us = periodUsForOdr(nominal_odr_hz);
 // either -- it is 138 SCL periods at 400 kHz, arithmetic.
 //
 // **The saving grace is that it barely matters.** Across the whole plausible
-// range of E_slow (0% to 19.2%) the threshold moves 9966 -> 11812 us, a span
+// range of E_slow (0% to 19.2%) the threshold moves 9962 -> 11808 us, a span
 // smaller than one 5 ms control period. The detector's output is quantised to
 // that period anyway, so taking the worst case costs nothing observable.
 //
@@ -96,7 +96,7 @@ inline constexpr uint32_t worstCasePeriodUs(uint32_t nominalUs)
 
 inline constexpr uint32_t worst_case_period_us = worstCasePeriodUs(nominal_period_us);
 
-// 11812 us at 208 Hz nominal.
+// 11808 us at 208 Hz nominal.
 inline constexpr uint32_t stall_timeout_us = 2u * worst_case_period_us + burst_delay_us;
 
 // --- Recovery policy -------------------------------------------------------
@@ -132,9 +132,6 @@ inline constexpr uint32_t stall_timeout_us = 2u * worst_case_period_us + burst_d
 // recovery. That has never been run.
 inline constexpr uint32_t recovery_attempts_before_persistent = 3;
 
-// Retained for callers that want an explicit period count.
-inline constexpr uint32_t stall_periods = 3;
-
 // --- Timeout arithmetic ---------------------------------------------------
 
 // Microseconds of silence that constitute a stall.
@@ -142,7 +139,13 @@ inline constexpr uint32_t stall_periods = 3;
 // Saturates rather than wrapping: periodUs * periods is computed in 64 bits and
 // clamped, so a large ODR period cannot fold round into a tiny timeout and
 // produce a detector that fires constantly.
-inline constexpr uint32_t stallTimeoutUs(uint32_t periodUs, uint32_t periods = stall_periods)
+// The period count is MANDATORY. It used to default to the old stall_periods
+// placeholder, which meant stallTimeoutUs(nominal_period_us) returned 14421 us
+// and read like the authoritative API while the derived threshold is 11808 --
+// +22% on the blind window, in the direction of a MISSED stall, which this file
+// states everywhere is the unsafe direction. Callers should want
+// stall_timeout_us; this remains only for an explicit, deliberate period count.
+inline constexpr uint32_t stallTimeoutUs(uint32_t periodUs, uint32_t periods)
 {
     const uint64_t product = static_cast<uint64_t>(periodUs) * static_cast<uint64_t>(periods);
     return product > static_cast<uint64_t>(UINT32_MAX) ? UINT32_MAX

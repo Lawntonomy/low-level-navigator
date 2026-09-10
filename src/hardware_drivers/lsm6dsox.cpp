@@ -24,6 +24,11 @@ constexpr uint32_t who_am_i_retry_ms = 2;
 // paid once at boot and buys a first sample that is not a startup transient.
 constexpr uint32_t settle_ms = 100;
 
+// SW_RESET self-clears. The datasheet gives no time for it, so this is a
+// generous bound rather than a derived one: the whole configuration sequence is
+// already budgeted in tens of milliseconds and this is paid once at boot.
+constexpr unsigned sw_reset_poll_limit = 20;
+
 // ---------------------------------------------------------------------------
 // Configuration values. Order matters: see the comment in configure().
 //
@@ -118,6 +123,58 @@ bool lsm6dsox::configure()
         return false;
     }
 
+    // **SW_RESET first, and it is not hygiene -- it is what makes the warm-boot
+    // path work at all.**
+    //
+    // The LSM6DSOX is not reset by an RP2350 reset: its VDD is not cycled. So
+    // after a watchdog reset, a picotool reboot, a debugger attach, or a reflash
+    // over diagnostics/imu-probe, the part comes up still holding the previous
+    // boot's INT1_CTRL = 0x03, still sampling at 208 Hz, with nobody having read
+    // its output registers since. Data-ready is latched and clears only on an
+    // output-register read, so **INT1 is already high and stays high** -- and
+    // arming a RISING-edge interrupt on a pin that is already high never fires.
+    // Worse, the SDK's gpio_set_irq_enabled() acknowledges stale events as it
+    // enables, so even a latched edge is dropped.
+    //
+    // The result is a stream that is dead before it starts while every
+    // observable says otherwise: WHO_AM_I passes, all four CTRL registers read
+    // back correct, the DMA channel is idle with no error flag, and so
+    // raise_fault() is never reached. SAF-25 is satisfied in letter and defeated
+    // in substance. Cold boot works, which is exactly why this would have looked
+    // fine once.
+    //
+    // SW_RESET restores INT1_CTRL to its 0x00 reset value, which drives the pin
+    // low because nothing is routed to it -- re-establishing the cold-boot
+    // precondition that the whole arming order in rt.h depends on. Note this
+    // does not rely on SW_RESET clearing DRDY itself; it relies on nothing
+    // reaching the pin until enableDataReadyInterrupt() writes 0x03, at which
+    // point the first data-ready produces a genuine rising edge.
+    if (!imu_i2c::writeReg(lsm6dsox::device_addr, lsm6dsox::reg_ctrl3_c,
+                           lsm6dsox::ctrl3_c_sw_reset))
+    {
+        Log::error(category, "SW_RESET write failed");
+        return false;
+    }
+    for (unsigned waited = 0;; ++waited)
+    {
+        uint8_t ctrl3 = 0;
+        if (!imu_i2c::readReg(lsm6dsox::device_addr, lsm6dsox::reg_ctrl3_c, &ctrl3, 1))
+        {
+            Log::error(category, "SW_RESET poll failed");
+            return false;
+        }
+        if ((ctrl3 & lsm6dsox::ctrl3_c_sw_reset) == 0)
+        {
+            break;
+        }
+        if (waited >= sw_reset_poll_limit)
+        {
+            Log::error(category, "SW_RESET did not self-clear");
+            return false;
+        }
+        sleep_ms(1);
+    }
+
     for (const RegWrite& w : config_sequence)
     {
         if (!imu_i2c::writeReg(lsm6dsox::device_addr, w.reg, w.value))
@@ -141,6 +198,18 @@ bool lsm6dsox::configure()
             Log::error(category, w.name);
             return false;
         }
+    }
+
+    // INT1_CTRL must still be 0x00 here. Checking it is how the warm-boot defect
+    // above is prevented from coming back silently: if a future change drops the
+    // SW_RESET, or SW_RESET stops clearing this register, the symptom is a dead
+    // stream with every other observable healthy -- which is expensive to
+    // diagnose and free to assert against.
+    uint8_t int1 = 0xFF;
+    if (!imu_i2c::readReg(lsm6dsox::device_addr, lsm6dsox::reg_int1_ctrl, &int1, 1) || int1 != 0x00)
+    {
+        Log::error(category, "INT1_CTRL not clear after reset");
+        return false;
     }
 
     Log::info(category, "lsm6dsox configured");
