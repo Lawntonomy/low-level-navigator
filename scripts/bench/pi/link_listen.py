@@ -47,6 +47,12 @@ EXPECTED_HZ = {0: 20, 42010: 20, 42011: 50, 42012: 1}
 
 MAV_MODE_FLAG_SAFETY_ARMED = 0x80
 
+# MAV_STATE. link.cpp reports MAV_STATE_CRITICAL whenever safety::Fault is not
+# none, and MAV_STATE_ACTIVE otherwise, so this byte is the cheapest read of
+# "is a fault latched" that needs no dialect.
+MAV_STATE = {0: "UNINIT", 1: "BOOT", 2: "CALIBRATING", 3: "STANDBY", 4: "ACTIVE",
+             5: "CRITICAL", 6: "EMERGENCY", 7: "POWEROFF", 8: "FLIGHT_TERMINATION"}
+
 
 def openPort(path, baud):
     """
@@ -116,7 +122,7 @@ def main():
     print(f"listening on {args.port} at {args.baud} for {args.seconds}s (transmitting nothing)")
 
     counts, senders = {}, set()
-    session, armed, hb_seen = None, None, 0
+    session, armed, hb_seen, state = None, None, 0, None
     buf = bytearray()
     deadline = time.monotonic() + args.seconds
     while time.monotonic() < deadline:
@@ -142,6 +148,7 @@ def main():
                     session = struct.unpack_from("<I", payload, 0)[0]
                 base = payload[6] if len(payload) >= 7 else 0
                 armed = bool(base & MAV_MODE_FLAG_SAFETY_ARMED)
+                state = payload[7] if len(payload) >= 8 else 0
 
     total = sum(counts.values())
     print()
@@ -166,6 +173,11 @@ def main():
     if hb_seen:
         print(f"session id    0x{session:08X}  (changes only when the Pico restarts)")
         print(f"armed         {'YES -- disarm before doing anything else' if armed else 'no'}")
+        print(f"system_status {state} ({MAV_STATE.get(state, '?')})")
+        if state == 5:
+            print("              CRITICAL means a fault is LATCHED. In protocol v1 a latched")
+            print("              fault needs a deliberate reset; the machine will not arm.")
+            print("              Read LAWN_NAV_STATUS.fault for the code (7 = init failed).")
     else:
         print("no HEARTBEAT seen: arm state and session id unknown")
     return 0
