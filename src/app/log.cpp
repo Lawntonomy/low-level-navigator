@@ -34,8 +34,32 @@ inline uint32_t used_unsafe()
     return (head - tail) & ring_mask;
 }
 
+// True once vTaskStartScheduler() is running. Before that, taskENTER_CRITICAL()
+// masks interrupts and the SMP vTaskExitCritical() does NOT unmask, because it
+// only unmasks when xSchedulerRunning is true -- the landmine main.cpp documents
+// at its safety::init() call. So a queued write during boot would mask
+// interrupts for the rest of boot. Everything that logs during init would hit
+// this: every driver's Log:: calls run before the scheduler.
+bool scheduler_running()
+{
+    return xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED;
+}
+
 void push(const char* src, uint32_t n)
 {
+    // Pre-scheduler, the ring has no consumer anyway -- logger_task does not
+    // exist yet -- so queueing would only defer the bytes until after boot and
+    // risk dropping them if init is chatty. Write them out now, where blocking
+    // is free because nothing else is running.
+    if (!scheduler_running())
+    {
+        for (uint32_t i = 0; i < n; i++)
+        {
+            uart_putc_raw(board::console_uart(), src[i]);
+        }
+        return;
+    }
+
     taskENTER_CRITICAL();
     const uint32_t space = ring_mask - used_unsafe();
     if (n > space)
