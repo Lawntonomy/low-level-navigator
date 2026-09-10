@@ -54,8 +54,12 @@ inline constexpr uint8_t reg_ctrl1_xl = 0x10;
 // Gyroscope control: ODR, full scale.
 inline constexpr uint8_t reg_ctrl2_g = 0x11;
 
-// Block Data Update and general device control.
+// Block Data Update and general device control. Bit 0 is SW_RESET, which
+// matters more than BDU does: the LSM6DSOX is NOT reset by an RP2350 reset, so
+// without this write the part carries the previous boot's configuration --
+// including INT1_CTRL -- across every warm reset, reflash and debugger attach.
 inline constexpr uint8_t reg_ctrl3_c = 0x12;
+inline constexpr uint8_t ctrl3_c_sw_reset = 0x01;
 
 // DRDY_MASK and other secondary control bits.
 inline constexpr uint8_t reg_ctrl4_c = 0x13;

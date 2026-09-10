@@ -73,6 +73,13 @@ volatile uint32_t completion_discards = 0;
 // runs before the scheduler exists, INT1 at 0x00 may make no kernel call at
 // all, and a 208 Hz writer on the kernel's shared SIO pair would add exactly
 // the core-1 coupling rt.h's Cores note is trying to keep small.
+// Bounded, so the ISR can never spin. Eight single-shot attempts is far more
+// than enough for a transient reservation loss, and cheap: each is three
+// instructions.
+constexpr unsigned burst_lock_attempts = 8;
+
+uint32_t burst_lock_contended = 0;
+
 spin_lock_t* sample_lock = nullptr;
 spin_lock_t* burst_lock = nullptr;
 
@@ -131,8 +138,44 @@ void int1Handler()
     // blocking() sets PRIMASK, which would mask priority 0x00 itself. Nothing
     // on core 0 can preempt a 0x00 handler, so there is nothing local to
     // protect against anyway.
-    if (!spin_try_lock_unsafe(burst_lock))
+    // **A try-lock miss is NOT evidence that core 1 holds the lock.**
+    //
+    // On RP2350 these are software spin locks, not hardware ones:
+    // PICO_USE_SW_SPIN_LOCKS defaults to 1 on this silicon "due to errata"
+    // (pico-sdk hardware/sync/spin_lock.h). So spin_try_lock_unsafe() is a
+    // single-shot ldaexb/strexb that returns false on a *spurious* strexb failure
+    // as well as on genuine contention -- and ARM requires software to tolerate
+    // that by retrying. The blocking form does retry; the try form deliberately
+    // does not.
+    //
+    // Treating a miss as contention and returning is therefore fatal rather than
+    // benign: latched data-ready means the skipped burst is not one lost sample,
+    // it is the last sample, permanently. The locks are adjacent bytes in the
+    // same SRAM array, so any store by core 1 inside the exclusives granule --
+    // which takeSample()/peekSample() do every control iteration -- can clear
+    // this core's reservation. That is the SAF-27 shape: a mechanism meant to
+    // protect the stream killing it instead.
+    //
+    // Bounded retry distinguishes the two causes without ever spinning, so rule
+    // (a)'s deadlock argument still holds: is_spin_locked() is a plain load, and
+    // the loop cannot exceed a fixed count.
+    bool locked = false;
+    for (unsigned attempt = 0; attempt < burst_lock_attempts && !locked; ++attempt)
     {
+        if (is_spin_locked(burst_lock))
+        {
+            // Genuinely held by core 1's forced recovery read, which re-arms
+            // DRDY just as well. Skipping loses nothing -- rule (a).
+            burst_lock_contended = burst_lock_contended + 1;
+            return;
+        }
+        locked = spin_try_lock_unsafe(burst_lock);
+    }
+    if (!locked)
+    {
+        // Reservation lost repeatedly without the lock ever being held. Counted
+        // separately because it means something entirely different from
+        // contention, and because the stream is now dead until recovery runs.
         burst_lock_misses = burst_lock_misses + 1;
         return;
     }
@@ -178,7 +221,32 @@ void dmaHandler()
     {
         return;
     }
+    // DMA_IRQ_0 fires for ANY channel with INTE0 set. Nothing else in this tree
+    // enables it today (encoder.cpp claims channels but never sets irq0), but an
+    // unconditional ack of only our own channel would leave a future second user's
+    // interrupt permanently asserted -- and because this installs an exclusive
+    // handler, that author would "fix" it by switching to a shared handler and
+    // inherit the bug. Same reason the GPIO handler checks its event mask.
+    if ((dma_hw->ints0 & (1u << static_cast<uint>(chan))) == 0)
+    {
+        return;
+    }
     dma_channel_acknowledge_irq0(static_cast<uint>(chan));
+
+    // **Snapshot BEFORE the busy gate, not after.** An INT1 edge landing in the
+    // few instructions between the gate and the snapshot would increment the
+    // counter before it is read, so the recheck below would compare equal and
+    // publish -- pairing the COMPLETED burst's bytes with the NEW burst's
+    // timestamp. That is a one-period timestamp error on one sample, followed by
+    // the next sample being discarded as a duplicate, and an interval that
+    // missedSamples() scores as a gap of 0. Silent interpolation in the one field
+    // ADR-0007 exists to keep honest.
+    //
+    // Ordering this way is complete: a burst armed before the snapshot is caught
+    // by burstBusy(), one armed after it is caught by the recheck. There is no
+    // third case.
+    const uint32_t started_before = bursts_started;
+    __dmb();
 
     // The burst buffer is stable only between a completion and the next arming.
     // If a newer burst is already in flight, DMA is overwriting it right now and
@@ -202,13 +270,10 @@ void dmaHandler()
     // that is occasionally stale -- a corrupt accelerometer Z that still looks
     // like a plausible reading.
     //
-    // Reader side of the single-writer handoff: snapshot the counter, then the
-    // stamp and the bytes, then re-check the counter. If INT1 ran at any point
-    // in between -- including part-way through the non-atomic 64-bit stamp load
-    // -- the pair may straddle two samples and is thrown away rather than
-    // published.
-    const uint32_t started_before = bursts_started;
-    __dmb();
+    // Reader side of the single-writer handoff. If INT1 ran at any point after
+    // the snapshot above -- including part-way through the non-atomic 64-bit
+    // stamp load -- the pair may straddle two samples and is thrown away rather
+    // than published.
     const uint64_t stamp_us = latched_stamp_us;
 
     uint8_t raw[imu_sample::burst_bytes];
