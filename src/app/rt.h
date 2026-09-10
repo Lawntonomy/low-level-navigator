@@ -233,6 +233,58 @@ static_assert(irq_prio_imu_dma >= configMAX_SYSCALL_INTERRUPT_PRIORITY,
 // bus than the sensor already does.
 constexpr uint32_t imu_forced_reads_per_control_iteration = 1;
 
+// ---------------------------------------------------------------------------
+// A forced recovery read clears the latch; its bytes are thrown away
+//
+// Decided 2026-09-09, review finding F4. A forced read has no INT1 edge, and so
+// no hardware timestamp. Publishing its bytes would require stamping them in
+// task context -- which IF-0001 section 7.4 puts at +/-1 ms or worse and
+// "explicitly forbidden", against the +/-2 us the DRDY architecture exists to
+// buy. Smuggling a millisecond-class stamp into a microsecond-class stream to
+// save one sample is the wrong trade: the estimator cannot tell the two apart,
+// so the whole stream inherits the worse bound.
+//
+// So the forced read is an *action*, not a sample: it exists to clear latched
+// DRDY so the next genuine edge can occur. Its bytes are discarded.
+//
+// The gap accounting stays honest for free, which is the part worth noticing.
+// Because the forced read does not advance the published stamp, the interval
+// from the last published sample to the next genuine one spans the whole
+// outage, and imu_stall::missedSamples() scores every period in it. The
+// discarded sample is counted in that gap rather than vanishing.
+//
+// It must be counted under its own name, NOT as a duplicate completion. Those
+// mean different things -- a duplicate is a bug, a recovery read is the system
+// working -- and sharing a counter would make the bench reading ambiguous
+// exactly when it matters.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// An INT1 edge during the INT1_CTRL write is benign, and why
+//
+// Review finding F10. Writing INT1_CTRL = 0x03 is what starts the stream, and
+// the sensor asserts INT1 on the ACK of that data byte -- while
+// i2c_write_timeout_us() is still polling for STOP_DET. So int1Handler can enter
+// and call startBurstRead() with main() mid-call, which is the shape rt.h's
+// ordering rule exists to forbid everywhere else.
+//
+// It is benign here, for a reason specific to this write: the STOP-flagged
+// command word is already in the TX FIFO before the poll begins, so the
+// handler's 13 words queue behind it and the DW_apb_i2c issues the STOP and then
+// a fresh START -- a correct burst. setTarget() cannot fire in that window
+// either, because IC_TAR already points at 0x6A, so the hw->enable = 0 that
+// would abort a transaction is never reached. Worst case main's write blocks an
+// extra ~350 us, well inside its 10 ms timeout.
+//
+// **This is an argument, not a measurement.** Confirm it once on the bench:
+// first boot after a power cycle, scope SCL at the driver end across the
+// INT1_CTRL write, expect one STOP followed by a new START, and check that
+// counters().edges starts incrementing. If it does wedge, do NOT fix it by
+// arming the GPIO IRQ after INT1_CTRL -- that inverts the ordering rule above
+// and loses the first edge, which with latched DRDY means the stream never
+// starts at all.
+// ---------------------------------------------------------------------------
+
 // Stacks: the IMU path adds no task stack. Both handlers run on the core 0 main
 // stack, worst case INT1 preempting the DMA handler — two frames, under ~350
 // bytes. Confirm that headroom rather than inheriting it:
