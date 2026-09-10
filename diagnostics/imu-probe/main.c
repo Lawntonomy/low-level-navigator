@@ -57,6 +57,7 @@
 #define REG_CTRL4_C 0x13
 #define REG_STATUS 0x1E
 #define REG_OUTX_L_G 0x22 // 12 bytes: gyro XYZ then accel XYZ
+#define CTRL3_C_SW_RESET 0x01
 
 #define LSM6DSOX_WHO_AM_I 0x6C
 #define LIS3MDL_WHO_AM_I 0x3D // expected, but not read from the LIS3MDL datasheet in this repo
@@ -90,19 +91,25 @@ static void int1Isr(uint gpio, uint32_t events)
     edge_count = n + 1;
 }
 
+// Bounded, not blocking. The unbounded SDK calls cost a whole bench cycle on
+// 2026-09-09: a write that left the part not ACKing hung this program before its
+// first printf, so it reported nothing at all and looked identical to a board
+// that had not been flashed. A diagnostic that can hang is not a diagnostic.
+#define I2C_TIMEOUT_US 10000
+
 static bool regRead(uint8_t addr, uint8_t reg, uint8_t* dst, size_t len)
 {
-    if (i2c_write_blocking(i2c0, addr, &reg, 1, true) != 1)
+    if (i2c_write_timeout_us(i2c0, addr, &reg, 1, true, I2C_TIMEOUT_US) != 1)
     {
         return false;
     }
-    return i2c_read_blocking(i2c0, addr, dst, len, false) == (int) len;
+    return i2c_read_timeout_us(i2c0, addr, dst, len, false, I2C_TIMEOUT_US) == (int) len;
 }
 
 static bool regWrite(uint8_t addr, uint8_t reg, uint8_t val)
 {
     const uint8_t buf[2] = {reg, val};
-    return i2c_write_blocking(i2c0, addr, buf, 2, false) == 2;
+    return i2c_write_timeout_us(i2c0, addr, buf, 2, false, I2C_TIMEOUT_US) == 2;
 }
 
 static const char* addrNote(uint8_t addr)
@@ -152,7 +159,7 @@ int main(void)
     for (uint8_t addr = 0x08; addr < 0x78; addr++)
     {
         uint8_t rx;
-        if (i2c_read_blocking(i2c0, addr, &rx, 1, false) >= 0)
+        if (i2c_read_timeout_us(i2c0, addr, &rx, 1, false, I2C_TIMEOUT_US) >= 0)
         {
             if (found_n < count_of(found))
             {
@@ -167,6 +174,40 @@ int main(void)
 
     uint8_t who = 0;
     const bool who_ok = imu_addr && regRead(imu_addr, REG_WHO_AM_I, &who, 1);
+
+    // SW_RESET characterisation. The driver's configure() now issues SW_RESET
+    // first, because the part is not reset by an RP2350 reset and otherwise
+    // carries the previous boot's INT1_CTRL across a reflash -- leaving a
+    // latched INT1 that a rising-edge IRQ can never see. That fix was written
+    // without a datasheet self-clear time, and low-level-nav then latched
+    // init_failed on hardware with no log output to say which check failed.
+    // This isolates it: how long the bit takes to clear, whether it clears at
+    // all, and what INT1_CTRL and CTRL3_C read afterwards.
+    bool sw_reset_written = false;
+    bool sw_reset_cleared = false;
+    int sw_reset_ms = -1;
+    uint8_t int1_after_reset = 0xFF;
+    uint8_t ctrl3_after_reset = 0xFF;
+    if (who_ok && who == LSM6DSOX_WHO_AM_I)
+    {
+        sw_reset_written = regWrite(imu_addr, REG_CTRL3_C, CTRL3_C_SW_RESET);
+        if (sw_reset_written)
+        {
+            for (int ms = 0; ms <= 50; ms++)
+            {
+                uint8_t c3 = 0xFF;
+                if (regRead(imu_addr, REG_CTRL3_C, &c3, 1) && (c3 & CTRL3_C_SW_RESET) == 0)
+                {
+                    sw_reset_cleared = true;
+                    sw_reset_ms = ms;
+                    break;
+                }
+                sleep_ms(1);
+            }
+            regRead(imu_addr, REG_INT1_CTRL, &int1_after_reset, 1);
+            regRead(imu_addr, REG_CTRL3_C, &ctrl3_after_reset, 1);
+        }
+    }
 
     bool cfg_written = false;
     bool cfg_verified = false;
@@ -304,6 +345,26 @@ int main(void)
                    LSM6DSOX_WHO_AM_I, (who_ok && who == LSM6DSOX_WHO_AM_I) ? "PASS" : "FAIL");
             printf("      (a LIS3MDL, if present, should read 0x%02X at its own address)\n",
                    LIS3MDL_WHO_AM_I);
+        }
+
+        printf("\n[2b] SW_RESET behaviour (the driver now depends on this)\n");
+        printf("      write CTRL3_C=0x01   %s\n", sw_reset_written ? "ACKed" : "FAILED");
+        if (sw_reset_written)
+        {
+            if (sw_reset_cleared)
+            {
+                printf("      self-cleared after   %d ms\n", sw_reset_ms);
+            }
+            else
+            {
+                printf("      >> DID NOT self-clear within 50 ms. The driver polls for 20 ms\n");
+                printf("         and fails configure() if it does not, which latches\n");
+                printf("         init_failed and refuses to arm.\n");
+            }
+            printf("      INT1_CTRL after      0x%02X  (want 0x00 -- this is the point of\n",
+                   int1_after_reset);
+            printf("                           the reset: nothing routed to the pin)\n");
+            printf("      CTRL3_C after        0x%02X\n", ctrl3_after_reset);
         }
 
         printf("\n[3] Configuration readback\n");
