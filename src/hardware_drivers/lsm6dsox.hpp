@@ -32,7 +32,28 @@ namespace lsm6dsox
 // never starts and it looks exactly like a disconnected pin. So INT1_CTRL is
 // written by the interrupt-handling piece, after the IRQ is armed, and its
 // absence here is a decision rather than an omission.
-bool configure();
+// Why configure() stopped. Returned rather than logged because
+// hardware_drivers/ holds thin register-level drivers with no app-layer
+// dependency (CLAUDE.md), and because the caller is the only place that knows
+// which of its reporting channels actually reaches a human -- on this firmware
+// Log:: goes to printf and both stdio backends are disabled, so a driver that
+// logged its own failure would be logging into a void.
+enum class ConfigResult : uint8_t
+{
+    ok = 0,
+    no_response,            // WHO_AM_I did not read 0x6C after every retry
+    sw_reset_write_failed,  // the CTRL3_C write was not ACKed
+    sw_reset_poll_failed,   // CTRL3_C became unreadable while polling
+    sw_reset_timeout,       // SW_RESET never self-cleared
+    config_write_failed,    // one of the four CTRL writes was not ACKed
+    config_readback_failed, // a CTRL register read back wrong, or not at all
+    int1_not_clear,         // INT1_CTRL was not 0x00 after the reset
+};
+
+// Human-readable, for whatever channel the caller has. Always non-null.
+const char* describe(ConfigResult r);
+
+ConfigResult configure();
 
 // Writes INT1_CTRL = 0x03 (INT1_DRDY_XL | INT1_DRDY_G), which is what starts
 // the data-ready stream.

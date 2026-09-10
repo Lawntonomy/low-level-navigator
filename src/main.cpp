@@ -166,6 +166,30 @@ namespace
 
     for (;;)
     {
+        // Stop refilling the ring while a bootloader request is outstanding.
+        //
+        // A latched request only becomes a reboot when the TX ring drains --
+        // link_tx_task calls link::tx_quiesce(), which returns false unless the
+        // ring is empty. At the IF-0001 rates (20 + 20 + 50 + 1 Hz) this task
+        // refills it faster than the window can open, so the request sat pending
+        // indefinitely: observed on the bench 2026-09-10, three attempts,
+        // accepted each time with no refusal and an unchanged session id, so the
+        // Pico never rebooted. That made remote reflashing of a firmware with no
+        // USB stack -- the only kind this project ships -- depend on luck.
+        //
+        // Suppressing telemetry here rather than refusing pushes in link:: keeps
+        // the rule in one place and keeps the refusal out of the hot path. It
+        // costs nothing: the machine is already disarmed by the time a request is
+        // latched, it is about to reset, and the Pi learns why from the reset
+        // itself. Heartbeats stopping is the correct signal, not a regression --
+        // SAF-3 exists for exactly this, and a node that is rebooting should look
+        // like one.
+        if (bootloader::pending())
+        {
+            vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(rt::period_telemetry_ms));
+            continue;
+        }
+
         const uint64_t now = time_us_64();
 
         if (now >= next_hb)
@@ -330,7 +354,34 @@ int main()
     // IO_BANK0 enable and the NVIC enable are per core -- and core 0 arming is
     // what guarantees the control task on core 1 cannot be preempted by INT1 or
     // by the IMU's DMA channel.
-    const bool imu_ready = imu_i2c::init() && lsm6dsox::configure() && imu_drdy::init();
+    // Each step reported separately, because "IMU init FAILED" on its own sent a
+    // bench session chasing the wrong suspect on 2026-09-09. The driver's own
+    // Log:: lines already name the failing check, but Log:: resolves to printf
+    // and both stdio backends are disabled in this build, so they reach nobody --
+    // see the logging note in app/log.hpp. log_console is the channel that has a
+    // listener, and this runs before the scheduler where blocking costs nothing.
+    const bool i2c_ok = imu_i2c::init();
+    if (!i2c_ok)
+    {
+        log_console::write_blocking("[boot] IMU: imu_i2c::init() failed (bus, or DMA claim)\r\n");
+    }
+
+    lsm6dsox::ConfigResult cfg = lsm6dsox::ConfigResult::ok;
+    if (i2c_ok)
+    {
+        cfg = lsm6dsox::configure();
+        if (cfg != lsm6dsox::ConfigResult::ok)
+        {
+            log_console::write("[boot] IMU: configure() failed: %s\r\n", lsm6dsox::describe(cfg));
+        }
+    }
+
+    const bool cfg_ok = i2c_ok && (cfg == lsm6dsox::ConfigResult::ok);
+    const bool imu_ready = cfg_ok && imu_drdy::init();
+    if (cfg_ok && !imu_ready)
+    {
+        log_console::write_blocking("[boot] IMU: imu_drdy::init() failed (spinlock claim)\r\n");
+    }
 
     if (!imu_ready)
     {
