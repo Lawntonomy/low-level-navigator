@@ -55,4 +55,7 @@ void Log::start()
 {
 }
 
-bool Log::log_started = false;
+// Log::log_started and Log::logger_task were removed from the header when Log::
+// became an adapter over log_console rather than a channel of its own: the queue
+// and task they belonged to were scaffolding that nothing ever fed. The stub no
+// longer has to define them.
